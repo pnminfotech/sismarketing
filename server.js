@@ -23,6 +23,9 @@ const documentRoutes = require('./routes/documentRoutes');
 const tenantRoutes = require('./routes/tenant'); 
 const Payment = require('./routes/payments');
 const leaveRoutes = require("./routes/leaveRoutes");
+const Notification = require("./models/Notification");
+const adminNotificationsRouter = require("./routes/adminattendenceNotifications");
+const adminLeave = require("./routes/adminLeaveRoutes");
 dotenv.config();
 
 const app = express();
@@ -73,7 +76,15 @@ app.use('/api/documents', documentRoutes);
 // ✅ Tenant module (this fixes your 404 for /api/tenant/auth/request-otp)
 app.use('/api/tenant', tenantRoutes);
 app.use('/api/payments', Payment);
-app.use("/api", leaveRoutes);
+// app.use("/api", leaveRoutes);
+app.use("/api/tenant/leaves", leaveRoutes);
+app.use("/api", require("./routes/notifications"));
+// server.js / app.js
+app.use("/api/admin", adminLeave);
+app.use("/api", require("./routes/tenantAttendance"));
+
+app.use("/api/admin", adminNotificationsRouter);
+
 
 /* ----------------------- Route listing (optional) ---------------------- */
 // Safe helper to log registered routes (dev only)

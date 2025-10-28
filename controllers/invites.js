@@ -9,7 +9,8 @@ exports.createInvite = async (req, res) => {
   const prefill = req.body || {};
 
   const origin = req.get('X-Origin') || req.get('Origin') || 'http://localhost:3000';
-  const url = new URL('/HostelManager/tenant-intake', origin);
+  // const url = new URL('/HostelManager/tenant-intake', origin);
+   const url = new URL('/rentmanagementwebapp/tenant-intake', origin);
 
   url.searchParams.set('tenant', 'true');
   url.searchParams.set('lock', '1');

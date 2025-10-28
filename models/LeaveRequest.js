@@ -1,33 +1,14 @@
-// const mongoose = require("mongoose");
-
-// const leaveRequestSchema = new mongoose.Schema({
-//   tenant: {
-//     type: mongoose.Schema.Types.ObjectId,
-//     ref: "User",
-//     required: true,
-//   },
-//   leaveDate: { type: Date, required: true },
-//   note: { type: String, trim: true },
-//   status: {
-//     type: String,
-//     enum: ["pending", "approved", "rejected", "cancelled"],
-//     default: "pending",
-//   },
-//   requestedAt: { type: Date, default: Date.now },
-// });
-
-// module.exports = mongoose.model("LeaveRequest", leaveRequestSchema);
-
-
-// models/LeaveRequest.js
 const mongoose = require("mongoose");
 
-const leaveRequestSchema = new mongoose.Schema({
-  tenant: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  leaveDate: { type: Date, required: true },
-  note: { type: String, trim: true },
-  status: { type: String, enum: ["pending","approved","rejected","cancelled"], default: "pending" },
-  requestedAt: { type: Date, default: Date.now },
-});
+const LeaveRequestSchema = new mongoose.Schema(
+  {
+    tenant: { type: mongoose.Schema.Types.ObjectId, ref: "Form", required: true },
+    tenantName: String,            // denormalized optional
+    leaveDate: { type: Date, required: true },
+    note: String,
+    status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
+  },
+  { timestamps: true }
+);
 
-module.exports = mongoose.model("LeaveRequest", leaveRequestSchema);
+module.exports = mongoose.models.LeaveRequest || mongoose.model("LeaveRequest", LeaveRequestSchema, "leaverequests");

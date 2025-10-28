@@ -10,11 +10,8 @@ const createLeaveRequest = async (req, res) => {
     if (!leaveDate)
       return res.status(400).json({ message: "Leave date is required." });
 
-    const newLeave = new LeaveRequest({
-      tenant: tenantId,
-      leaveDate,
-      note,
-    });
+   const newLeave = new LeaveRequest({ tenantId, leaveDate, note });
+
 
     await newLeave.save();
     res.status(201).json({ message: "Leave request submitted.", leave: newLeave });

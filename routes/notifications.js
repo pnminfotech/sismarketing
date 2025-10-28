@@ -149,121 +149,111 @@
 
 
 
-
 // routes/notifications.js
 const express = require("express");
 const router = express.Router();
 
-const Notification = require("../models/Notification");
 const Form = require("../models/formModels");
+const LeaveRequest = require("../models/LeaveRequest");
 
-// Optional: in-memory SSE clients
-const sseClients = new Set();
-function pushSSE(event, payload) {
-  const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
-  for (const res of sseClients) {
-    try { res.write(data); } catch {}
-  }
-}
+// ---- (OPTIONAL) admin auth; swap with your real middleware if you have one
+const adminOnly = (req, res, next) => next();
 
-// ===== SSE endpoint =====
-router.get("/notifications/stream", (req, res) => {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.flushHeaders?.();
+// =======================
+// ADMIN: Leave notifications
+// =======================
 
-  const keepAlive = setInterval(() => res.write("event: ping\ndata: {}\n\n"), 25000);
-  sseClients.add(res);
-  res.write(`event: hello\ndata: {"ok":true}\n\n`);
-
-  req.on("close", () => {
-    clearInterval(keepAlive);
-    sseClients.delete(res);
-    try { res.end(); } catch {}
-  });
-});
-
-// ===== Admin list (optional) =====
-router.get("/notifications", async (req, res) => {
+// GET /api/admin/notifications/leave?status=pending&limit=50
+router.get("/admin/notifications/leave", adminOnly, async (req, res) => {
   const { status = "pending", limit = 50 } = req.query;
   const q = status === "all" ? {} : { status };
-  const items = await Notification.find(q).sort({ createdAt: -1 }).limit(Number(limit));
+
+  const docs = await LeaveRequest.find(q)
+    .sort({ createdAt: -1 })
+    .limit(Math.min(Number(limit) || 50, 200))
+    .populate({ path: "tenant", select: "name roomNo bedNo" })
+    .lean();
+
+  const items = docs.map((d) => ({
+    _id: String(d._id),
+    type: "leave_request",
+    tenantId: d.tenant?._id || null,
+    tenantName: d.tenantName || d.tenant?.name || "Tenant",
+    roomNo: d.tenant?.roomNo,
+    bedNo: d.tenant?.bedNo,
+    leaveDate: d.leaveDate,
+    note: d.note,
+    status: d.status,
+    createdAt: d.createdAt,
+    requestId: String(d._id),
+  }));
+
   res.json(items);
 });
 
-// ===== Tenant list =====
-router.get("/tenant/:tenantId/notifications", async (req, res) => {
-  const items = await Notification.find({ tenantId: req.params.tenantId }).sort({ createdAt: -1 });
-  res.json(items);
-});
+// POST /api/admin/leave/:id/approve
+router.post("/admin/leave/:id/approve", adminOnly, async (req, res) => {
+  const lr = await LeaveRequest.findById(req.params.id);
+  if (!lr) return res.status(404).json({ message: "Leave request not found" });
+  if (lr.status !== "pending") return res.status(400).json({ message: "Already processed" });
 
-// ===== Mark as read =====
-router.patch("/notifications/:id/read", async (req, res) => {
-  const n = await Notification.findByIdAndUpdate(req.params.id, { $set: { read: true } }, { new: true });
-  if (!n) return res.status(404).json({ error: "Not found" });
-  res.json({ ok: true, notification: n });
-});
+  lr.status = "approved";
+  await lr.save();
 
-// ===== APPROVE / REJECT (match your frontend URLs) =====
-// Decides based on notification.type
-router.post("/notifications/:id/approve", async (req, res) => {  const n = await Notification.findById(req.params.id);
-  if (!n) return res.status(404).json({ error: "Not found" });
-
-  n.status = "approved";
-  await n.save();
-
-  // Side effects by type
-  if (n.type === "leave_request" && n.leaveDate && n.tenantId) {
-    await Form.findByIdAndUpdate(n.tenantId, { $set: { leaveDate: n.leaveDate } });
+  if (lr.tenant && lr.leaveDate) {
+    await Form.findByIdAndUpdate(lr.tenant, { $set: { leaveDate: lr.leaveDate } });
   }
-  // If payment_report: update your Payment model here if desired.
 
-  // Push a tenant-facing notification (so it appears in their table)
-  await Notification.create({
-    type: "system",
-    tenantId: n.tenantId,
-    title: "Request Approved",
-    message: "Your request has been approved.",
-    status: "sent"
-  });
-
-  pushSSE("updated", { _id: n._id, status: "approved" });
-  res.json({ ok: true, notification: n });
+  res.json({ ok: true });
 });
 
-router.post("/notifications/:id/reject", async (req, res) => {
-  const n = await Notification.findById(req.params.id);
-  if (!n) return res.status(404).json({ error: "Not found" });
+// POST /api/admin/leave/:id/reject
+router.post("/admin/leave/:id/reject", adminOnly, async (req, res) => {
+  const lr = await LeaveRequest.findById(req.params.id);
+  if (!lr) return res.status(404).json({ message: "Leave request not found" });
+  if (lr.status !== "pending") return res.status(400).json({ message: "Already processed" });
 
-  n.status = "rejected";
-  await n.save();
+  lr.status = "rejected";
+  await lr.save();
 
-  await Notification.create({
-    type: "system",
-    tenantId: n.tenantId,
-    title: "Request Rejected",
-    message: "Your request has been rejected.",
-    status: "sent"
-  });
-
-  pushSSE("updated", { _id: n._id, status: "rejected" });
-  res.json({ ok: true, notification: n });
+  res.json({ ok: true });
 });
 
-// ===== Helper to create a new notification from other routers =====
-async function createNotification({ type, tenantId, title, message, meta, amount, month, year, utr, note, receiptUrl, leaveDate }) {
-  const n = await Notification.create({
-    type, tenantId, title, message, status: "pending",
-    amount, month, year, utr, note, receiptUrl, leaveDate,
-    ...(meta ? { meta } : {})
-  });
-  pushSSE("created", n);
-  return n;
-}
+// DEV-ONLY: seed one pending leave so the bell can see something
+// POST or GET /api/admin/notifications/leave/_seed
+router.post("/admin/notifications/leave/_seed", async (req, res) => {
+  try {
+    const anyTenant = await Form.findOne().lean();
+    if (!anyTenant) return res.status(400).json({ message: "No tenant to attach" });
 
-// expose helper while keeping the router export a function
-router.createNotification = createNotification;
+    const doc = await LeaveRequest.create({
+      tenant: anyTenant._id,
+      tenantName: anyTenant.name,
+      leaveDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      note: "Family function",
+      status: "pending",
+    });
+    res.json(doc);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+router.get("/admin/notifications/leave/_seed", async (req, res) => {
+  try {
+    const anyTenant = await Form.findOne().lean();
+    if (!anyTenant) return res.status(400).json({ message: "No tenant to attach" });
+
+    const doc = await LeaveRequest.create({
+      tenant: anyTenant._id,
+      tenantName: anyTenant.name,
+      leaveDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      note: "Family function",
+      status: "pending",
+    });
+    res.json(doc);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
 
 module.exports = router;
