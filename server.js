@@ -47,9 +47,11 @@ console.log({
 /* ----------------------------- Middleware ------------------------------ */
 app.use(cors());
 app.use(express.json());
+// app.use("/api/tenant/auth", tenantAuthRoutes);
 
 // Static files for uploaded content
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static('uploads'));
 
 // Optional: quiet Chrome DevTools CSP probe in dev (cosmetic)
 app.get('/.well-known/appspecific/com.chrome.devtools.json', (_req, res) => res.sendStatus(204));

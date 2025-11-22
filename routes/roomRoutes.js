@@ -83,12 +83,17 @@
 
 
 
-
 const express = require('express');
 const router = express.Router();
-const Room = require('../models/Room');
 
-// Get all rooms
+// ✔ Model corrected
+const Room = require('../models/Room.js');
+
+const { deleteBedFromRoom } = require("../controllers/roomsController");
+
+/* ============================
+   GET ALL ROOMS
+============================ */
 router.get('/', async (req, res) => {
   try {
     const rooms = await Room.find();
@@ -99,7 +104,9 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Add a new room
+/* ============================
+   ADD NEW ROOM
+============================ */
 router.post('/', async (req, res) => {
   try {
     const room = new Room(req.body);
@@ -111,7 +118,9 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Add a bed to a room (price optional)
+/* ============================
+   ADD BED TO ROOM
+============================ */
 router.post('/:roomNo/bed', async (req, res) => {
   const { roomNo } = req.params;
   let { bedNo, price } = req.body;
@@ -124,17 +133,11 @@ router.post('/:roomNo/bed', async (req, res) => {
     const room = await Room.findOne({ roomNo });
     if (!room) return res.status(404).json({ message: 'Room not found' });
 
-    const exists = room.beds.some(bed => bed.bedNo === bedNo);
-    if (exists) {
+    if (room.beds.some(bed => bed.bedNo === bedNo)) {
       return res.status(400).json({ message: 'Bed number already exists in this room' });
     }
 
-    // If price is not provided, set it to null
-    if (price === undefined || price === '') {
-      price = null;
-    }
-
-    room.beds.push({ bedNo, price });
+    room.beds.push({ bedNo, price: price ?? null });
     await room.save();
 
     res.json({ message: 'Bed added successfully', room });
@@ -144,7 +147,14 @@ router.post('/:roomNo/bed', async (req, res) => {
   }
 });
 
-// Update bed price
+/* ============================
+   DELETE BED FROM ROOM
+============================ */
+router.delete("/:roomNo/bed/:bedNo", deleteBedFromRoom);
+
+/* ============================
+   UPDATE BED PRICE
+============================ */
 router.put('/:roomNo/bed/:bedNo', async (req, res) => {
   const { roomNo, bedNo } = req.params;
   const { price } = req.body;

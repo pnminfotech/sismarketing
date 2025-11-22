@@ -39,62 +39,70 @@ const mongoose = require('mongoose');
 
 const formSchema = new mongoose.Schema(
   {
+    // Sr No
     srNo: { type: Number, unique: true, required: true },
 
+    // Basic info
     name: { type: String, required: true },
     joiningDate: { type: Date, required: true },
     roomNo: { type: String },
     depositAmount: { type: Number, required: true },
 
-    // main address stays
+    // Main address
     address: { type: String, required: true },
 
-    phoneNo: { type: Number, required: true },
+    // Better as string (to keep leading zeros, country codes, etc.)
+    phoneNo: { type: String, required: true },
 
-    // ⛔ removed address text fields for relatives as per your request
-    // relativeAddress1: { type: String },
-    // relativeAddress2: { type: String },
+    // Relatives
+    // relative1Relation: {
+    //   type: String,
+    //   enum: ["Self", "Sister", "Brother", "Father", "Husband", "Mother"],
+    //   default: "Self",
+    // },
+    relative1Name: { type: String, default: "" },
+    relative1Address: { type: String, default: "" },  // 👈 NEW FIELD
 
-    // ✅ NEW: relative contact triplets (relation + name + phone)
-    relative1Relation: {
-      type: String,
-      enum: ["Self", "Sister", "Brother", "Father", "Husband", "Mother"],
-      default: "Self",
-    },
-    relative1Name:  { type: String, default: "" },
     relative1Phone: { type: String, default: "" },
 
-    relative2Relation: {
-      type: String,
-      enum: ["Self", "Sister", "Brother", "Father", "Husband", "Mother"],
-      default: "Self",
-    },
-    relative2Name:  { type: String, default: "" },
+    // relative2Relation: {
+    //   type: String,
+    //   enum: ["Self", "Sister", "Brother", "Father", "Husband", "Mother"],
+    //   default: "Self",
+    // },
+    relative2Name: { type: String, default: "" },
+    relative2Address: { type: String, default: "" },  // 👈 NEW FIELD
+
     relative2Phone: { type: String, default: "" },
 
     floorNo: { type: String },
     bedNo: { type: String },
     companyAddress: { type: String },
-    dateOfJoiningCollege: { type: Date, required: true },
-    dob: { type: Date, required: true },
+   
 
     baseRent: { type: Number },
-    rents: [
-      {
-        rentAmount: { type: Number },
-        date: { type: Date },
-        month: { type: String },
-        paymentMode: {
-      type: String,
-      enum: ["Cash", "Online"],
-      default: "Cash"
-    }
-      },
-    ],
 
+    // ✅ Rents array – matches updateForm + frontend payload
+    rents: {
+      type: [
+        {
+          rentAmount: { type: Number, default: 0 },   // amount paid for that month
+          date: { type: Date },                       // actual payment date
+          month: { type: String, required: true },    // e.g. "Nov-25"
+          paymentMode: {
+            type: String,
+            enum: ["Cash", "Online"],
+            default: "Cash",
+          },
+        },
+      ],
+      default: [],
+    },
+
+    // Still string because your leave code compares as "YYYY-MM-DD"
     leaveDate: { type: String },
 
-    // ✅ Updated: supports both legacy disk URLs and DB-backed files
+    // Documents
     documents: [
       {
         fileName: { type: String },
@@ -108,7 +116,7 @@ const formSchema = new mongoose.Schema(
         size: { type: Number },
         relation: {
           type: String,
-          enum: ["Self", "Father", "Mother", "Husband","Sister","Brother"],
+          enum: ["Self", "Father", "Mother", "Husband", "Sister", "Brother"],
           default: "Self",
         },
       },

@@ -1,6 +1,7 @@
 // routes/formRoutes.js
 const express = require('express');
 const router = express.Router();
+const upload = require("../middleware/uploadMiddleware");
 
 // Models (used by a couple of inline routes)
 const Form = require('../models/formModels');
@@ -36,7 +37,7 @@ router.post('/forms', createWithOptionalInvite);
 
 // For UI to show next SrNo (server still assigns the real one)
 router.get('/forms/count', getNextSrNo);
-
+router.get("/tenants", getForms);
 // ───────────────────────────────────────────────────────────────────────────────
 // INVITES (create + validate)
 // ───────────────────────────────────────────────────────────────────────────────
@@ -55,7 +56,10 @@ router.post('/forms/leave', saveLeaveDate);
 router.post('/forms/archive', archiveForm);
 router.post('/forms/restore', restoreForm);
 
-router.put("/update/:id", updateProfile);
+// router.put("/update/:id", updateProfile);
+router.put("/update/:id", upload.array("documents"), updateProfile);
+
+
 router.get("/forms", getForms);
 router.post("/leave", processLeave);
 

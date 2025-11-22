@@ -5,9 +5,9 @@ const DuplicateForm = require('../models/DuplicateForm');
 const cron = require("node-cron");
 const Counter = require('../models/counterModel');
 
-// ───────────────────────────────────────────────────────────────────────────────
-// LEAVE processing + daily archive
-// ───────────────────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────────
+   LEAVE processing + daily archive
+   ──────────────────────────────────────────────────────────────────────────── */
 const processLeave = async (req, res) => {
   try {
     const { formId, leaveDate } = req.body;
@@ -52,9 +52,9 @@ cron.schedule("0 0 * * *", async () => {
   }
 });
 
-// ───────────────────────────────────────────────────────────────────────────────
-// Sr No (display only; server still assigns real one in create)
-// ───────────────────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────────
+   Sr No (display only; server still assigns real one in create)
+   ──────────────────────────────────────────────────────────────────────────── */
 const getNextSrNo = async (req, res) => {
   try {
     const counter = await Counter.findOne({ name: "form_srno" });
@@ -65,9 +65,9 @@ const getNextSrNo = async (req, res) => {
   }
 };
 
-// ───────────────────────────────────────────────────────────────────────────────
-// (Legacy) saveForm – kept for compatibility, not bound to POST /forms route
-// ───────────────────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────────
+   (Legacy) saveForm – kept for compatibility, not bound to POST /forms route
+   ──────────────────────────────────────────────────────────────────────────── */
 const saveForm = async (req, res) => {
   try {
     const counter = await Counter.findOneAndUpdate(
@@ -91,9 +91,9 @@ const saveForm = async (req, res) => {
   }
 };
 
-// ───────────────────────────────────────────────────────────────────────────────
-// READ ALL
-// ───────────────────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────────
+   READ ALL
+   ──────────────────────────────────────────────────────────────────────────── */
 const getAllForms = async (req, res) => {
   try {
     const forms = await Form.find();
@@ -103,37 +103,83 @@ const getAllForms = async (req, res) => {
   }
 };
 
-// ───────────────────────────────────────────────────────────────────────────────
-// RENT update helpers
-// ───────────────────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────────
+   RENT update helpers
+   ──────────────────────────────────────────────────────────────────────────── */
 const getMonthYear = (date) => {
   const d = new Date(date);
   return `${d.toLocaleString('default', { month: 'short' })}-${d.getFullYear().toString().slice(-2)}`;
 };
 
+/**
+ * PUT /api/form/:id
+ * Body: { rentAmount, date, month, paymentMode? }
+ * Safely updates/creates a rent entry in form.rents
+ */
 const updateForm = async (req, res) => {
   const { id } = req.params;
-  const { rentAmount, date, month } = req.body;
+  const { rentAmount, date, month, paymentMode } = req.body;
+
+  console.log("📝 updateForm called with:", { id, rentAmount, date, month, paymentMode });
 
   try {
     const form = await Form.findById(id);
-    if (!form) return res.status(404).json({ message: "Form not found" });
 
-    const rentIndex = form.rents.findIndex((rent) => rent.month === month);
+    if (!form) {
+      console.error("❌ Form not found for id:", id);
+      return res.status(404).json({ message: "Form not found" });
+    }
 
-    if (rentIndex !== -1) {
-      form.rents[rentIndex] = { rentAmount: Number(rentAmount), date: new Date(date), month };
+    // Ensure rents is always an array
+    if (!Array.isArray(form.rents)) {
+      form.rents = [];
+    }
+
+    // Validate month & date
+    if (!month) {
+      return res.status(400).json({ message: "Month is required for rent update" });
+    }
+
+    const paymentDate = date ? new Date(date) : new Date();
+    if (isNaN(paymentDate.getTime())) {
+      return res.status(400).json({ message: "Invalid date value" });
+    }
+
+    const index = form.rents.findIndex((rent) => rent.month === month);
+
+    const rentObj = {
+      rentAmount: Number(rentAmount) || 0,
+      date: paymentDate,
+      month,
+    };
+
+    // If your schema supports a field like "mode" or "paymentMode", include it:
+    if (paymentMode) {
+      rentObj.paymentMode = paymentMode;
+      rentObj.mode = paymentMode; // keep both keys if old data uses "mode"
+    }
+
+    if (index !== -1) {
+      // Update existing month entry
+      form.rents[index] = { ...form.rents[index], ...rentObj };
     } else {
-      form.rents.push({ rentAmount: Number(rentAmount), date: new Date(date), month });
+      // Add new month entry
+      form.rents.push(rentObj);
     }
 
     const updatedForm = await form.save();
+    console.log("✅ Rent updated successfully for form:", id);
+
     res.status(200).json(updatedForm);
   } catch (error) {
+    console.error("❌ Error updating rent:", error);
     res.status(500).json({ message: "Error updating rent: " + error.message });
   }
 };
 
+/* ──────────────────────────────────────────────────────────────────────────────
+   DELETE main Form (archive copy in DuplicateForm)
+   ──────────────────────────────────────────────────────────────────────────── */
 const deleteForm = async (req, res) => {
   const { id } = req.params;
 
@@ -281,27 +327,77 @@ const getArchivedForms = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    let updateData = req.body;
 
+    console.log("📥 Update Tenant Body:", updateData);
+    console.log("📎 Incoming files:", req.files);
+
+    // 1) Clean out undefined / empty string fields
+    Object.keys(updateData).forEach((key) => {
+      if (updateData[key] === undefined || updateData[key] === "") {
+        delete updateData[key];
+      }
+    });
+
+    // 2) SPECIAL FIX: normalize depositAmount (can come as ["500","500"])
+    if (updateData.depositAmount !== undefined) {
+      if (Array.isArray(updateData.depositAmount)) {
+        // Take the last or first – here we take the last submitted
+        const last = updateData.depositAmount[updateData.depositAmount.length - 1];
+        updateData.depositAmount = Number(last);
+      } else {
+        updateData.depositAmount = Number(updateData.depositAmount);
+      }
+
+      // If still NaN, remove it so it doesn't crash
+      if (isNaN(updateData.depositAmount)) {
+        console.warn("⚠ depositAmount is NaN, removing from update");
+        delete updateData.depositAmount;
+      }
+    }
+
+    // 3) If files are uploaded, handle them
+    if (req.files?.length > 0) {
+      updateData.documents = req.files.map((file, index) => ({
+        fileName: file.originalname,
+        url: `/uploads/${file.filename}`,  // or wherever you store
+        contentType: file.mimetype,
+        size: file.size,
+        relation: updateData[`relation_${index}`] || "Self",
+      }));
+    }
+
+    // 4) Do the actual update
     const updatedForm = await Form.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
     });
 
     if (!updatedForm) {
-      return res.status(404).json({ message: "Entity not found" });
+      return res.status(404).json({ message: "Tenant not found" });
     }
 
-    res.status(200).json(updatedForm);
+    res.status(200).json({ message: "Updated successfully", updatedForm });
   } catch (error) {
-    res.status(500).json({ message: "Server Error", error });
+    console.error("❌ Update error:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
 };
 
+
+
+/**
+ * GET /api/form/:id
+ * Try Form collection first; if not found, then Archive.
+ */
 const getFormById = async (req, res) => {
   try {
     const { id } = req.params;
-    const form = await Archive.findById(id);
+
+    let form = await Form.findById(id);
+    if (!form) {
+      form = await Archive.findById(id);
+    }
 
     if (!form) {
       return res.status(404).json({ message: 'Form not found' });
@@ -309,6 +405,7 @@ const getFormById = async (req, res) => {
 
     res.json(form);
   } catch (error) {
+    console.error("❌ Error in getFormById:", error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
@@ -320,7 +417,7 @@ const rentAmountDel = async (req, res) => {
     const form = await Form.findById(formId);
     if (!form) return res.status(404).json({ message: "Form not found" });
 
-    form.rents = form.rents.filter((rent) => rent.month !== monthYear);
+    form.rents = (form.rents || []).filter((rent) => rent.month !== monthYear);
     await form.save();
 
     res.status(200).json({ message: "Rent entry removed successfully", form });
