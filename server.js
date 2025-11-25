@@ -1,11 +1,9 @@
-
-
 // server.js
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
-
+const smsRoutes = require("./routes/smsRoutes");
 const { connectDB } = require('./config/db');
 
 // Routers
@@ -26,6 +24,7 @@ const leaveRoutes = require("./routes/leaveRoutes");
 const Notification = require("./models/Notification");
 const adminNotificationsRouter = require("./routes/adminattendenceNotifications");
 const adminLeave = require("./routes/adminLeaveRoutes");
+
 dotenv.config();
 
 const app = express();
@@ -52,7 +51,7 @@ app.use(express.json());
 // Static files for uploaded content
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/uploads', express.static('uploads'));
-
+app.use("/api/sms", smsRoutes);
 // Optional: quiet Chrome DevTools CSP probe in dev (cosmetic)
 app.get('/.well-known/appspecific/com.chrome.devtools.json', (_req, res) => res.sendStatus(204));
 
