@@ -1,70 +1,11 @@
-// const express = require("express");
-// const router = express.Router();
-// // const PaymentNotification = require("../models/PaymentNotification");
-// const PaymentNotification = require('../models/PaymentNotification');
-
-// // list notifications for the bell
-// router.get("/notifications", async (req, res) => {
-//   const { status = "all", limit = 30 } = req.query;
-//   const q = status === "all" ? {} : { status };
-//   const items = await PaymentNotification.find(q).sort({ createdAt: -1 }).limit(Number(limit));
-//   res.json(items);
-// });
-
-// // mark all read (filter optional)
-// router.post("/notifications/read-all", async (req, res) => {
-//   const { status = "all" } = req.body || {};
-//   const q = status === "all" ? {} : { status };
-//   await PaymentNotification.updateMany(q, { $set: { read: true } });
-//   res.sendStatus(204);
-// });
-
-// // mark single read
-// router.patch("/notifications/:id/read", async (req, res) => {
-//   await PaymentNotification.findByIdAndUpdate(req.params.id, { $set: { read: true } });
-//   res.sendStatus(204);
-// });
-
-// // approve / reject
-// router.post("/approve/:id", async (req, res) => {
-//   const n = await PaymentNotification.findByIdAndUpdate(
-//     req.params.id,
-//     { $set: { status: "approved", read: true } },
-//     { new: true }
-//   );
-//   if (!n) return res.sendStatus(404);
-//   res.json(n);
-// });
-
-// router.post("/reject/:id", async (req, res) => {
-//   const n = await PaymentNotification.findByIdAndUpdate(
-//     req.params.id,
-//     { $set: { status: "rejected", read: true } },
-//     { new: true }
-//   );
-//   if (!n) return res.sendStatus(404);
-//   res.json(n);
-// });
-
-// // (optional) a broader “reports” list the UI might call
-// router.get("/reports", async (req, res) => {
-//   const { status = "all", limit = 50 } = req.query;
-//   const q = status === "all" ? {} : { status };
-//   const items = await PaymentNotification.find(q).sort({ createdAt: -1 }).limit(Number(limit));
-//   res.json(items);
-// });
-
-// module.exports = router;
-
-
-
-// routes/paymentRouter.js
+// routes/payments.js
 const express = require("express");
 const router = express.Router();
 
 const PaymentNotification = require("../models/PaymentNotification");
 const Payment = require("../models/Payment");
 const Form = require("../models/formModels"); // your tenant collection ("Form")
+const { sendRentPendingReminder } = require("../controllers/payments"); // 🔹 NEW
 
 // --- helpers ---
 /** Convert (year, month 1..12) -> Date at first of that month. Falls back to "now". */
@@ -73,6 +14,12 @@ function monthToFirstDate(year, month1to12) {
   const y = Number(year) || now.getFullYear();
   const mIdx = (Number(month1to12) || (now.getMonth() + 1)) - 1; // 0..11
   return new Date(y, mIdx, 1);
+}
+
+function toMonthKey(y, m /* 0..11 */) {
+  return `${new Date(y, m, 1).toLocaleString("en-US", {
+    month: "short",
+  })}-${String(y).slice(-2)}`;
 }
 
 /* =========================
@@ -108,7 +55,9 @@ router.post("/notifications/read-all", async (req, res) => {
 
 router.patch("/notifications/:id/read", async (req, res) => {
   try {
-    await PaymentNotification.findByIdAndUpdate(req.params.id, { $set: { read: true } });
+    await PaymentNotification.findByIdAndUpdate(req.params.id, {
+      $set: { read: true },
+    });
     res.sendStatus(204);
   } catch (err) {
     console.error("PATCH /payments/notifications/:id/read error:", err);
@@ -128,92 +77,55 @@ router.post("/approve/:id", async (req, res) => {
     const notif = await PaymentNotification.findById(req.params.id);
     if (!notif) return res.status(404).json({ message: "notification not found" });
 
-    // Load payment (by linked id; fall back to search)
     let pay = notif.paymentId ? await Payment.findById(notif.paymentId) : null;
     if (!pay) {
       pay = await Payment.findOne({
         tenant: notif.tenantId,
-        status: "reported",
         amount: notif.amount,
         month: notif.month,
         year: notif.year,
-        utr: notif.utr || undefined,
       }).sort({ createdAt: -1 });
     }
     if (!pay) return res.status(404).json({ message: "linked payment not found" });
 
-    if (pay.status !== "reported") {
-      return res.status(400).json({ message: `payment already ${pay.status}` });
-    }
-
-    // Upsert a rent record into the tenant form for that month
     const tenant = await Form.findById(notif.tenantId);
     if (!tenant) return res.status(404).json({ message: "tenant not found" });
 
-    const rentDate = monthToFirstDate(pay.year, pay.month);
-    const y = rentDate.getFullYear();
-    const m = rentDate.getMonth();
+    const rentDate = new Date(pay.year, pay.month - 1, 1);
+    const monthLabel = rentDate.toLocaleString("en-IN", { month: "short", year: "numeric" });
 
-    // const existing = (tenant.rents || []).find((r) => {
-    //   if (!r?.date) return false;
-    //   const d = new Date(r.date);
-    //   return d.getFullYear() === y && d.getMonth() === m;
-    // });
-// ⬇️ add near the top of the file if you like (helper)
-function toMonthKey(y, m /* 0..11 */) {
-  return `${new Date(y, m, 1).toLocaleString("en-US",{ month:"short" })}-${String(y).slice(-2)}`;
-}
+    tenant.rents.push({
+      month: monthLabel,
+      rentAmount: pay.amount,
+      date: new Date(),
+      paymentMode: pay.paymentMode,
+      utr: pay.utr || "",
+      note: pay.note || "",
+    });
+    await tenant.save();
 
-// ... inside /approve/:id AFTER you computed `rentDate`, `y`, `m`
-const monthKey = toMonthKey(y, m);
-
-// ✅ rent payload always includes a canonical month key
-const rentPayload = {
-  month: monthKey,
-  rentAmount: Number(pay.amount) || 0,
-  date: rentDate,                               // keep date as the payment date
-  paymentMode: pay.paymentMode || "Online",
-  utr: pay.utr || "",
-  note: pay.note || "",
-};
-
-// 🔎 find existing by month key OR by year-month of date (back-compat)
-const existing = (tenant.rents || []).find((r) => {
-  if (r?.month && r.month === monthKey) return true;
-  if (r?.date) {
-    const d = new Date(r.date);
-    return d.getFullYear() === y && d.getMonth() === m;
-  }
-  return false;
-});
-
-if (existing) {
-  existing.month = monthKey; // normalize
-  existing.rentAmount = rentPayload.rentAmount;
-  existing.date = rentPayload.date;
-  existing.paymentMode = rentPayload.paymentMode;
-  existing.utr = rentPayload.utr;
-  existing.note = rentPayload.note;
-} else {
-  tenant.rents = [...(tenant.rents || []), rentPayload];
-}
-await tenant.save();
-
-// Flip payment + notification
-pay.status = "confirmed";
-await pay.save();
+    pay.status = "confirmed";
+    await pay.save();
 
     notif.status = "approved";
     notif.read = true;
     await notif.save();
 
-    res.json({ ok: true, notification: notif });
+    const { sendRentPaidSms } = require("../services/sendRentPaidSms");
+    await sendRentPaidSms(tenant, {
+      amount: pay.amount,
+      monthLabel,
+      datePaid: new Date().toLocaleDateString("en-IN"),
+    });
+
+    return res.json({ ok: true, sms: "sent", tenantId: tenant._id });
+
   } catch (err) {
-    console.error("POST /payments/approve/:id error:", err);
+    console.error("Error approving payment:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
-
+ 
 /* ===========
  * REJECT
  * ===========
@@ -273,12 +185,13 @@ router.get("/reports", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 // One-off: backfill missing notifications for reported payments
-router.post('/bootstrap-notifs', async (req, res) => {
+router.post("/bootstrap-notifs", async (req, res) => {
   try {
-    const PaymentNotification = require('../models/PaymentNotification');
-    const Form = require('../models/formModels');
-    const reported = await Payment.find({ status: 'reported' }).lean();
+    const PaymentNotification = require("../models/PaymentNotification");
+    const Form = require("../models/formModels");
+    const reported = await Payment.find({ status: "reported" }).lean();
     const made = [];
 
     for (const pay of reported) {
@@ -295,7 +208,7 @@ router.post('/bootstrap-notifs', async (req, res) => {
         year: pay.year,
         utr: pay.utr,
         note: pay.note,
-        status: 'pending',
+        status: "pending",
         read: false,
       });
       made.push(doc._id);
@@ -303,9 +216,16 @@ router.post('/bootstrap-notifs', async (req, res) => {
 
     res.json({ ok: true, created: made.length, ids: made });
   } catch (e) {
-    console.error('bootstrap-notifs error:', e);
-    res.status(500).json({ message: 'bootstrap-notifs failed', error: String(e) });
+    console.error("bootstrap-notifs error:", e);
+    res.status(500).json({
+      message: "bootstrap-notifs failed",
+      error: String(e),
+    });
   }
 });
+
+// 🔹 NEW: send one rent-pending reminder SMS to a tenant
+// POST /api/payments/send-rent-reminder
+router.post("/send-rent-reminder", sendRentPendingReminder);
 
 module.exports = router;

@@ -1,11 +1,14 @@
 // controllers/forms/createWithOptionalInvite.js
 const mongoose = require("mongoose");
 const Invite = require("../../models/Invite");
-const Form = require("../../models/formModels");                 // shim -> models/formModels
-const Counter = require("../../models/counterModel");    // uses { name: "form_srno", seq: Number }
+const Form = require("../../models/formModels");
+const Counter = require("../../models/counterModel");
+
+// ⭐ ADD THIS IMPORT
+const { sendSMS_Admission } = require("../../utils/sendSMS");
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Atomic sequence for srNo (uses your Counter model)
+// Atomic sequence for srNo
 // ───────────────────────────────────────────────────────────────────────────────
 async function nextSrNo(session = null) {
   const opts = { new: true, upsert: true };
@@ -20,10 +23,10 @@ async function nextSrNo(session = null) {
   return Number(doc.seq);
 }
 
-// Always assign srNo on server; ignore any incoming srNo
+// Always assign srNo on server
 async function createFormWithSrNo(rest, session) {
   const payload = { ...rest };
-  delete payload.srNo;                // never trust client srNo
+  delete payload.srNo;
   payload.srNo = await nextSrNo(session);
 
   if (session) {
@@ -37,11 +40,18 @@ async function createWithOptionalInvite(req, res) {
   const session = await mongoose.startSession();
   const { inviteToken, ...rest } = req.body;
 
-  // ── No token: normal create with atomic srNo ────────────────────────────────
+  // ── No token: NORMAL tenant create ────────────────────────────────
   if (!inviteToken) {
     try {
       const saved = await createFormWithSrNo(rest, null);
+
+      // ⭐ SEND ADMISSION SMS IMMEDIATELY
+      try { await sendSMS_Admission(saved); } catch (smsErr) {
+        console.error("⚠ SMS failed (admission):", smsErr);
+      }
+
       return res.status(201).json(saved);
+
     } catch (err) {
       console.error("create form (no invite) error:", err);
       const isDupSr =
@@ -54,7 +64,7 @@ async function createWithOptionalInvite(req, res) {
     }
   }
 
-  // ── With token: single-use create (transaction if available) ───────────────
+  // ── With token flow ───────────────────────────────────────────────
   const plainSingleUseFlow = async () => {
     const now = new Date();
     const invite = await Invite.findOneAndUpdate(
@@ -70,11 +80,16 @@ async function createWithOptionalInvite(req, res) {
 
     const doc = await createFormWithSrNo(rest, null);
 
-    // best-effort backlink
+    // backlink
     await Invite.updateOne(
       { _id: invite._id },
       { $set: { usedByFormId: doc._id } }
     );
+
+    // ⭐ SEND ADMISSION SMS HERE ALSO
+    try { await sendSMS_Admission(doc); } catch (smsErr) {
+      console.error("⚠ SMS failed (admission):", smsErr);
+    }
 
     return doc;
   };
@@ -82,6 +97,7 @@ async function createWithOptionalInvite(req, res) {
   try {
     let created = null;
 
+    // Try transaction
     try {
       await session.withTransaction(async () => {
         const now = new Date();
@@ -107,12 +123,19 @@ async function createWithOptionalInvite(req, res) {
 
         created = doc;
       });
+
+      // ⭐ SEND ADMISSION SMS AFTER TRANSACTION SUCCESS
+      try { await sendSMS_Admission(created); } catch (smsErr) {
+        console.error("⚠ SMS failed (admission):", smsErr);
+      }
+
     } catch (txErr) {
       const msg = String(txErr?.message || "");
       const noTx =
         txErr?.code === 20 ||
         /Transaction numbers are only allowed/i.test(msg) ||
         /replica set/i.test(msg);
+
       if (noTx) {
         console.warn("[invites] Falling back to non-transaction flow:", msg);
         created = await plainSingleUseFlow();
@@ -122,6 +145,7 @@ async function createWithOptionalInvite(req, res) {
     }
 
     return res.status(201).json(created);
+
   } catch (err) {
     console.error("create (with invite) error:", err);
     const isDupSr =

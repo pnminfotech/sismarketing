@@ -4,6 +4,8 @@ const Archive = require('../models/archiveSchema');
 const DuplicateForm = require('../models/DuplicateForm');
 const cron = require("node-cron");
 const Counter = require('../models/counterModel');
+const { sendSMS_MonthPayment } = require("../utils/sendSMS");
+const { sendSMS_Admission } = require("../utils/sendSMS");
 
 /* ──────────────────────────────────────────────────────────────────────────────
    LEAVE processing + daily archive
@@ -84,10 +86,22 @@ const saveForm = async (req, res) => {
     const newForm = new Form(req.body);
     await newForm.save();
 
-    res.status(201).json({ message: 'Form submitted successfully', form: newForm });
+    /* -----------------------------------------------------------
+       🚀 SEND ADMISSION SMS IMMEDIATELY AFTER SAVING
+    ----------------------------------------------------------- */
+    await sendSMS_Admission(newForm);
+
+    return res.status(201).json({
+      message: "Form submitted successfully",
+      form: newForm
+    });
+
   } catch (error) {
-    console.error('❌ Error in saveForm:', error);
-    res.status(500).json({ message: 'Error submitting form', error: error.message });
+    console.error("❌ Error in saveForm:", error);
+    res.status(500).json({
+      message: "Error submitting form",
+      error: error.message
+    });
   }
 };
 
@@ -130,12 +144,10 @@ const updateForm = async (req, res) => {
       return res.status(404).json({ message: "Form not found" });
     }
 
-    // Ensure rents is always an array
     if (!Array.isArray(form.rents)) {
       form.rents = [];
     }
 
-    // Validate month & date
     if (!month) {
       return res.status(400).json({ message: "Month is required for rent update" });
     }
@@ -153,24 +165,31 @@ const updateForm = async (req, res) => {
       month,
     };
 
-    // If your schema supports a field like "mode" or "paymentMode", include it:
     if (paymentMode) {
       rentObj.paymentMode = paymentMode;
-      rentObj.mode = paymentMode; // keep both keys if old data uses "mode"
+      rentObj.mode = paymentMode;
     }
 
     if (index !== -1) {
-      // Update existing month entry
       form.rents[index] = { ...form.rents[index], ...rentObj };
     } else {
-      // Add new month entry
       form.rents.push(rentObj);
     }
 
     const updatedForm = await form.save();
     console.log("✅ Rent updated successfully for form:", id);
 
-    res.status(200).json(updatedForm);
+    /* 🚀🚀🚀 SEND MONTH PAYMENT SMS HERE */
+    await sendSMS_MonthPayment(
+      form,               // full tenant object
+      month,              // e.g. "Nov-25"
+      Number(rentAmount), // paid amount
+      paymentDate,        // date1
+      form.baseRent       // number1 (expected monthly rent)
+    );
+
+    return res.status(200).json(updatedForm);
+
   } catch (error) {
     console.error("❌ Error updating rent:", error);
     res.status(500).json({ message: "Error updating rent: " + error.message });
