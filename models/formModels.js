@@ -1,45 +1,8 @@
-// const mongoose = require('mongoose');
-
-// const formSchema = new mongoose.Schema(
-//   {
-//  srNo: {
-//   type: Number,
-//   unique: true,
-//   required: true
-// },
-
-//     name: { type: String, required: true },
-//     joiningDate: { type: Date, required: true },
-//     roomNo: { type: String },
-//     depositAmount: { type: Number, required: true },
-//     address: { type: String, required: true },
-//     phoneNo : {type: Number, required : true},
-//     relativeAddress1: { type: String }, 
-//     relativeAddress2: { type: String }, 
-//     floorNo: { type: String },
-//     bedNo: { type: String },
-//     companyAddress: { type: String }, 
-//     dateOfJoiningCollege: { type: Date, required: true },
-//     dob: { type: Date, required: true },
-//       // ✅ Add this line
-//   baseRent: { type: Number }, 
-//     rents: [
-//       {
-//         rentAmount: { type: Number},
-//         date: { type: Date},
-//         month: {type :String},
-//       },
-//     ],
-//     leaveDate: { type: String },
-//   });
-
-// module.exports = mongoose.model('Form', formSchema);
-
 const mongoose = require('mongoose');
 
 const formSchema = new mongoose.Schema(
   {
-    // Sr No
+    // Sr No (Unique)
     srNo: { type: Number, unique: true, required: true },
 
     // Basic info
@@ -51,44 +14,35 @@ const formSchema = new mongoose.Schema(
     // Main address
     address: { type: String, required: true },
 
-    // Better as string (to keep leading zeros, country codes, etc.)
+    // Phone as string (keeps leading zeros)
     phoneNo: { type: String, required: true },
 
-    // Relatives
-    // relative1Relation: {
-    //   type: String,
-    //   enum: ["Self", "Sister", "Brother", "Father", "Husband", "Mother"],
-    //   default: "Self",
-    // },
+    // Relative 1
     relative1Name: { type: String, default: "" },
-    relative1Address: { type: String, default: "" },  // 👈 NEW FIELD
-
+    relative1Address: { type: String, default: "" },
     relative1Phone: { type: String, default: "" },
 
-    // relative2Relation: {
-    //   type: String,
-    //   enum: ["Self", "Sister", "Brother", "Father", "Husband", "Mother"],
-    //   default: "Self",
-    // },
+    // Relative 2
     relative2Name: { type: String, default: "" },
-    relative2Address: { type: String, default: "" },  // 👈 NEW FIELD
-
+    relative2Address: { type: String, default: "" },
     relative2Phone: { type: String, default: "" },
 
     floorNo: { type: String },
     bedNo: { type: String },
     companyAddress: { type: String },
-   
 
     baseRent: { type: Number },
 
-    // ✅ Rents array – matches updateForm + frontend payload
+    // ✅ Rents array — FIXED: month is now optional (was required)
     rents: {
       type: [
         {
-          rentAmount: { type: Number, default: 0 },   // amount paid for that month
-          date: { type: Date },                       // actual payment date
-          month: { type: String, required: true },    // e.g. "Nov-25"
+          rentAmount: { type: Number, default: 0 }, // paid amount
+          date: { type: Date },                     // actual payment date
+
+          // IMPORTANT FIX ↓↓↓
+          month: { type: String, default: null },   // Was required:true → now safe
+
           paymentMode: {
             type: String,
             enum: ["Cash", "Online"],
@@ -99,7 +53,7 @@ const formSchema = new mongoose.Schema(
       default: [],
     },
 
-    // Still string because your leave code compares as "YYYY-MM-DD"
+    // Leave date (string used by your frontend logic)
     leaveDate: { type: String },
 
     // Documents
@@ -107,10 +61,10 @@ const formSchema = new mongoose.Schema(
       {
         fileName: { type: String },
 
-        // legacy (disk) link — keep for old records
+        // Legacy disk link
         url: { type: String },
 
-        // NEW: DB-backed fields (DocumentFile model)
+        // New DB fields
         fileId: { type: mongoose.Schema.Types.ObjectId, ref: "DocumentFile" },
         contentType: { type: String },
         size: { type: Number },

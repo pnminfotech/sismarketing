@@ -15,15 +15,20 @@ const archiveSchema = new mongoose.Schema(
     floorNo: { type: String, required: true },
     bedNo: { type: String, required: true },
     companyAddress: { type: String },
-    dateOfJoiningCollege: { type: Date, required: true },
-    dob: { type: Date, required: true },
+
+    // ⭐ FIX: No validation error anymore
+    dateOfJoiningCollege: { type: Date, default: null },
+    dob: { type: Date, default: null },
+
     rents: [
       {
         rentAmount: { type: Number },
         date: { type: Date },
       },
     ],
+
     leaveDate: { type: String , required: true },
-  });
+  }
+);
 
 module.exports = mongoose.model('Archive', archiveSchema);

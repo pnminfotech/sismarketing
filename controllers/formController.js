@@ -39,7 +39,8 @@ const processLeave = async (req, res) => {
 // CRON JOB to check for leave dates every day at midnight
 cron.schedule("0 0 * * *", async () => {
   try {
-    const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString('en-CA'); 
+
     const formsToArchive = await Form.find({ leaveDate: today });
 
     for (const form of formsToArchive) {
