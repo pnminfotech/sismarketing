@@ -1,48 +1,113 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const formSchema = new mongoose.Schema(
   {
-    // Sr No (Unique)
-    srNo: { type: Number, unique: true, required: true },
+    // ─────────────────────────────────────────
+    // Sr No (Unique, system-wide)
+    // ─────────────────────────────────────────
+    srNo: {
+      type: Number,
+      unique: true,
+      required: true,
+    },
 
-    // Basic info
-    name: { type: String, required: true },
-    joiningDate: { type: Date, required: true },
-    roomNo: { type: String },
-    depositAmount: { type: Number, required: true },
+    // ─────────────────────────────────────────
+    // 🔥 BUILDING / CATEGORY (CRITICAL FIX)
+    // ─────────────────────────────────────────
+    category: {
+      type: String,
+      required: true,
+      index: true,
+    },
 
-    // Main address
-    address: { type: String, required: true },
+    // ─────────────────────────────────────────
+    // Tenant basic info
+    // ─────────────────────────────────────────
+    name: {
+      type: String,
+      required: true,
+    },
 
-    // Phone as string (keeps leading zeros)
-    phoneNo: { type: String, required: true },
+    joiningDate: {
+      type: Date,
+      required: true,
+    },
 
-    // Relative 1
+    // ─────────────────────────────────────────
+    // Room identity (scoped by category)
+    // ─────────────────────────────────────────
+    roomNo: {
+      type: String,
+      required: true,
+    },
+
+    bedNo: {
+      type: String,
+      required: true,
+    },
+
+    floorNo: {
+      type: String,
+    },
+
+    // ─────────────────────────────────────────
+    // Money
+    // ─────────────────────────────────────────
+    depositAmount: {
+      type: Number,
+      required: true,
+    },
+
+    baseRent: {
+      type: Number,
+      default: 0,
+    },
+
+    // ─────────────────────────────────────────
+    // Contact & Address
+    // ─────────────────────────────────────────
+    address: {
+      type: String,
+      required: true,
+    },
+
+    phoneNo: {
+      type: String,
+      required: true,
+    },
+
+    companyAddress: {
+      type: String,
+    },
+
+    // ─────────────────────────────────────────
+    // Relatives
+    // ─────────────────────────────────────────
     relative1Name: { type: String, default: "" },
     relative1Address: { type: String, default: "" },
     relative1Phone: { type: String, default: "" },
 
-    // Relative 2
     relative2Name: { type: String, default: "" },
     relative2Address: { type: String, default: "" },
     relative2Phone: { type: String, default: "" },
 
-    floorNo: { type: String },
-    bedNo: { type: String },
-    companyAddress: { type: String },
-
-    baseRent: { type: Number },
-
-    // ✅ Rents array — FIXED: month is now optional (was required)
+    // ─────────────────────────────────────────
+    // Rents history
+    // ─────────────────────────────────────────
     rents: {
       type: [
         {
-          rentAmount: { type: Number, default: 0 }, // paid amount
-          date: { type: Date },                     // actual payment date
-
-          // IMPORTANT FIX ↓↓↓
-          month: { type: String, default: null },   // Was required:true → now safe
-
+          rentAmount: {
+            type: Number,
+            default: 0,
+          },
+          date: {
+            type: Date,
+          },
+          month: {
+            type: String,
+            default: null,
+          },
           paymentMode: {
             type: String,
             enum: ["Cash", "Online"],
@@ -53,21 +118,26 @@ const formSchema = new mongoose.Schema(
       default: [],
     },
 
-    // Leave date (string used by your frontend logic)
-    leaveDate: { type: String },
+    // ─────────────────────────────────────────
+    // Leave tracking
+    // ─────────────────────────────────────────
+    leaveDate: {
+      type: String,
+    },
 
+    // ─────────────────────────────────────────
     // Documents
+    // ─────────────────────────────────────────
     documents: [
       {
-        fileName: { type: String },
-
-        // Legacy disk link
-        url: { type: String },
-
-        // New DB fields
-        fileId: { type: mongoose.Schema.Types.ObjectId, ref: "DocumentFile" },
-        contentType: { type: String },
-        size: { type: Number },
+        fileName: String,
+        url: String,
+        fileId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "DocumentFile",
+        },
+        contentType: String,
+        size: Number,
         relation: {
           type: String,
           enum: ["Self", "Father", "Mother", "Husband", "Sister", "Brother"],
@@ -79,4 +149,12 @@ const formSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model('Form', formSchema);
+// ─────────────────────────────────────────
+// 🔐 COMPOUND UNIQUE INDEX (THE REAL FIX)
+// ─────────────────────────────────────────
+formSchema.index(
+  { category: 1, roomNo: 1, bedNo: 1 },
+  { unique: true }
+);
+
+module.exports = mongoose.model("Form", formSchema);

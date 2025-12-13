@@ -1,8 +1,16 @@
+
+
 // const express = require('express');
 // const router = express.Router();
-// const Room = require('../models/Room');
 
-// // Get all rooms
+// // ✔ Model corrected
+// const Room = require('../models/Room.js');
+
+// const { deleteBedFromRoom } = require("../controllers/roomsController");
+
+// /* ============================
+//    GET ALL ROOMS
+// ============================ */
 // router.get('/', async (req, res) => {
 //   try {
 //     const rooms = await Room.find();
@@ -13,7 +21,9 @@
 //   }
 // });
 
-// // Add a new room
+// /* ============================
+//    ADD NEW ROOM
+// ============================ */
 // router.post('/', async (req, res) => {
 //   try {
 //     const room = new Room(req.body);
@@ -25,7 +35,9 @@
 //   }
 // });
 
-// // Add a bed to a room (price optional)
+// /* ============================
+//    ADD BED TO ROOM
+// ============================ */
 // router.post('/:roomNo/bed', async (req, res) => {
 //   const { roomNo } = req.params;
 //   let { bedNo, price } = req.body;
@@ -38,17 +50,11 @@
 //     const room = await Room.findOne({ roomNo });
 //     if (!room) return res.status(404).json({ message: 'Room not found' });
 
-//     const exists = room.beds.some(bed => bed.bedNo === bedNo);
-//     if (exists) {
+//     if (room.beds.some(bed => bed.bedNo === bedNo)) {
 //       return res.status(400).json({ message: 'Bed number already exists in this room' });
 //     }
 
-//     // If price is not provided, set it to null
-//     if (price === undefined || price === '') {
-//       price = null;
-//     }
-
-//     room.beds.push({ bedNo, price });
+//     room.beds.push({ bedNo, price: price ?? null });
 //     await room.save();
 
 //     res.json({ message: 'Bed added successfully', room });
@@ -58,7 +64,14 @@
 //   }
 // });
 
-// // Update bed price
+// /* ============================
+//    DELETE BED FROM ROOM
+// ============================ */
+// router.delete("/:roomNo/bed/:bedNo", deleteBedFromRoom);
+
+// /* ============================
+//    UPDATE BED PRICE
+// ============================ */
 // router.put('/:roomNo/bed/:bedNo', async (req, res) => {
 //   const { roomNo, bedNo } = req.params;
 //   const { price } = req.body;
@@ -83,96 +96,150 @@
 
 
 
-const express = require('express');
+
+const express = require("express");
 const router = express.Router();
 
-// ✔ Model corrected
-const Room = require('../models/Room.js');
+const Room = require("../models/Room.js");
+const {
+  deleteBedFromRoom,
+} = require("../controllers/roomsController");
+const { getBedPrice } = require("../controllers/roomsController");
 
-const { deleteBedFromRoom } = require("../controllers/roomsController");
+
+router.get("/bed-price", getBedPrice);
+
 
 /* ============================
    GET ALL ROOMS
 ============================ */
-router.get('/', async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const rooms = await Room.find();
+    const rooms = await Room.find().sort({
+      category: 1,
+      floorNo: 1,
+      roomNo: 1,
+    });
     res.json(rooms);
   } catch (err) {
     console.error("Error fetching rooms:", err);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
 /* ============================
    ADD NEW ROOM
 ============================ */
-router.post('/', async (req, res) => {
+router.post("/", async (req, res) => {
   try {
-    const room = new Room(req.body);
-    await room.save();
-    res.json(room);
+    const { category, roomNo, floorNo } = req.body;
+
+    if (!category || !roomNo || !floorNo) {
+      return res
+        .status(400)
+        .json({ message: "category, roomNo, floorNo are required" });
+    }
+
+    const existing = await Room.findOne({ category, roomNo });
+    if (existing) {
+      return res
+        .status(400)
+        .json({ message: "Room already exists in this building" });
+    }
+
+    const room = await Room.create({
+      category,
+      roomNo,
+      floorNo,
+      beds: [],
+    });
+
+    res.status(201).json(room);
   } catch (err) {
     console.error("Error adding room:", err);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
 /* ============================
    ADD BED TO ROOM
 ============================ */
-router.post('/:roomNo/bed', async (req, res) => {
-  const { roomNo } = req.params;
-  let { bedNo, price } = req.body;
+router.post("/:category/:roomNo/bed", async (req, res) => {
+  const { category, roomNo } = req.params;
+  const { bedNo, price } = req.body;
 
   try {
     if (!bedNo) {
-      return res.status(400).json({ message: 'Missing bedNo' });
+      return res.status(400).json({ message: "Missing bedNo" });
     }
 
-    const room = await Room.findOne({ roomNo });
-    if (!room) return res.status(404).json({ message: 'Room not found' });
-
-    if (room.beds.some(bed => bed.bedNo === bedNo)) {
-      return res.status(400).json({ message: 'Bed number already exists in this room' });
+    const room = await Room.findOne({ category, roomNo });
+    if (!room) {
+      return res
+        .status(404)
+        .json({ message: "Room not found in this building" });
     }
 
-    room.beds.push({ bedNo, price: price ?? null });
+    const exists = room.beds.some(
+      (b) => b.bedNo.toLowerCase() === bedNo.toLowerCase()
+    );
+    if (exists) {
+      return res
+        .status(400)
+        .json({ message: "Bed number already exists in this room" });
+    }
+
+    room.beds.push({
+      bedNo,
+      price: price ?? null,
+    });
+
     await room.save();
-
-    res.json({ message: 'Bed added successfully', room });
+    res.status(201).json(room);
   } catch (err) {
     console.error("Error adding bed:", err);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/* ============================
+   UPDATE BED PRICE
+============================ */
+router.put("/:category/:roomNo/bed/:bedNo", async (req, res) => {
+  const { category, roomNo, bedNo } = req.params;
+  const { price } = req.body;
+
+  try {
+    const room = await Room.findOne({ category, roomNo });
+    if (!room)
+      return res.status(404).json({ message: "Room not found" });
+
+    const bed = room.beds.find(
+      (b) => b.bedNo.toLowerCase() === bedNo.toLowerCase()
+    );
+    if (!bed)
+      return res.status(404).json({ message: "Bed not found" });
+
+    bed.price = price ?? null;
+    await room.save();
+
+    res.json(room);
+  } catch (err) {
+    console.error("Error updating bed price:", err);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
 /* ============================
    DELETE BED FROM ROOM
 ============================ */
-router.delete("/:roomNo/bed/:bedNo", deleteBedFromRoom);
-
+router.delete(
+  "/:category/:roomNo/bed/:bedNo",
+  deleteBedFromRoom
+);
 /* ============================
-   UPDATE BED PRICE
+   GET BED PRICE (SAFE)
 ============================ */
-router.put('/:roomNo/bed/:bedNo', async (req, res) => {
-  const { roomNo, bedNo } = req.params;
-  const { price } = req.body;
-
-  try {
-    const room = await Room.findOne({ roomNo });
-    if (!room) return res.status(404).json({ message: 'Room not found' });
-
-    const bed = room.beds.find(b => b.bedNo === bedNo);
-    if (!bed) return res.status(404).json({ message: 'Bed not found' });
-
-    bed.price = price ?? null;
-    await room.save();
-    res.json(bed);
-  } catch (err) {
-    console.error("Error updating bed price:", err);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
+router.get("/bed-price", getBedPrice);
 
 module.exports = router;
