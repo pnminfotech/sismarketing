@@ -131,17 +131,19 @@ const getMonthYear = (date) => {
  * Body: { rentAmount, date, month, paymentMode? }
  * Safely updates/creates a rent entry in form.rents
  */
+// controllers/formController.js
+
+
 const updateForm = async (req, res) => {
-  const { id } = req.params;
-  const { rentAmount, date, month, paymentMode } = req.body;
-
-  console.log("📝 updateForm called with:", { id, rentAmount, date, month, paymentMode });
-
   try {
-    const form = await Form.findById(id);
+    const { month, rentAmount, paymentMode, date } = req.body;
 
+    if (!month) {
+      return res.status(400).json({ message: "Month is required" });
+    }
+
+    const form = await Form.findById(req.params.id);
     if (!form) {
-      console.error("❌ Form not found for id:", id);
       return res.status(404).json({ message: "Form not found" });
     }
 
@@ -149,53 +151,64 @@ const updateForm = async (req, res) => {
       form.rents = [];
     }
 
-    if (!month) {
-      return res.status(400).json({ message: "Month is required for rent update" });
-    }
+    // ✅ SAFE payment mode
+    const allowedModes = ["Cash", "Online", "UPI", "Card", "Bank"];
+    const safePaymentMode = allowedModes.includes(paymentMode)
+      ? paymentMode
+      : "Online";
 
-    const paymentDate = date ? new Date(date) : new Date();
-    if (isNaN(paymentDate.getTime())) {
-      return res.status(400).json({ message: "Invalid date value" });
-    }
+    // ✅ SAFE date (THIS FIXES 500)
+    const safeDate =
+      date && !isNaN(new Date(date).getTime())
+        ? new Date(date)
+        : new Date();
 
-    const index = form.rents.findIndex((rent) => rent.month === month);
-
-    const rentObj = {
-      rentAmount: Number(rentAmount) || 0,
-      date: paymentDate,
-      month,
-    };
-
-    if (paymentMode) {
-      rentObj.paymentMode = paymentMode;
-      rentObj.mode = paymentMode;
-    }
-
-    if (index !== -1) {
-      form.rents[index] = { ...form.rents[index], ...rentObj };
-    } else {
-      form.rents.push(rentObj);
-    }
-
-    const updatedForm = await form.save();
-    console.log("✅ Rent updated successfully for form:", id);
-
-    /* 🚀🚀🚀 SEND MONTH PAYMENT SMS HERE */
-    await sendSMS_MonthPayment(
-      form,               // full tenant object
-      month,              // e.g. "Nov-25"
-      Number(rentAmount), // paid amount
-      paymentDate,        // date1
-      form.baseRent       // number1 (expected monthly rent)
+    const rentIndex = form.rents.findIndex(
+      (r) => r.month === month
     );
 
-    return res.status(200).json(updatedForm);
+    const finalAmount = Number(rentAmount) || 0;
 
-  } catch (error) {
-    console.error("❌ Error updating rent:", error);
-    res.status(500).json({ message: "Error updating rent: " + error.message });
-  }
+    if (rentIndex !== -1) {
+      form.rents[rentIndex].rentAmount = finalAmount;
+      form.rents[rentIndex].paymentMode = safePaymentMode;
+      form.rents[rentIndex].date = safeDate;
+    } else {
+      form.rents.push({
+        month,
+        rentAmount: finalAmount,
+        paymentMode: safePaymentMode,
+        date: safeDate,
+      });
+    }
+
+    await form.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Rent updated successfully",
+      rents: form.rents,
+    });
+
+ } catch (error) {
+  console.error("🔥 RENT UPDATE ERROR (FULL):", error);
+  console.error("🔥 NAME:", error.name);
+  console.error("🔥 MESSAGE:", error.message);
+  console.error("🔥 ERRORS:", error.errors); // <-- CRITICAL
+
+  res.status(500).json({
+    message: "Error updating rent",
+    name: error.name,
+    error: error.message,
+    details: error.errors,
+  });
+}
 };
+
+
+
+
+
 
 /* ──────────────────────────────────────────────────────────────────────────────
    DELETE main Form (archive copy in DuplicateForm)
@@ -309,31 +322,39 @@ const archiveForm = async (req, res) => {
 };
 
 const restoreForm = async (req, res) => {
-  const { id } = req.body;
-  console.log('Restore Request ID:', id);
+  const { id, category } = req.body; // ✅ must be here
 
   try {
     const archivedData = await Archive.findById(id);
-    console.log('Archived Data Found:', archivedData);
+    if (!archivedData) return res.status(404).json({ message: "Archived data not found" });
 
-    if (!archivedData) {
-      return res.status(404).json({ message: 'Archived data not found' });
+    const archivedObj = archivedData.toObject();
+
+    const { leaveDate, _id, __v, createdAt, updatedAt, ...restoredData } = archivedObj;
+
+    restoredData.category = restoredData.category || category;
+
+    if (!restoredData.category) {
+      return res.status(400).json({
+        message: "category is required. Send category from frontend (selectedCategory).",
+      });
     }
 
-    const { leaveDate, ...restoredData } = archivedData.toObject();
-
-    const restoredForm = new Form(restoredData);
-    await restoredForm.save();
-
+    const restoredForm = await Form.create(restoredData);
     await Archive.findByIdAndDelete(id);
-    console.log('Archived Data Deleted:', id);
 
-    res.status(200).json(restoredForm);
+    return res.status(200).json({ message: "Tenant restored", data: restoredForm });
   } catch (error) {
-    console.error('Error restoring archived data:', error.message);
-    res.status(500).json({ message: 'Error restoring archived data' });
+    if (error?.name === "ValidationError") {
+      return res.status(400).json({ message: error.message });
+    }
+    if (error?.code === 11000) {
+      return res.status(409).json({ message: "Duplicate srNo already exists" });
+    }
+    return res.status(500).json({ message: "Error restoring archived data", error: error.message });
   }
 };
+
 
 const getArchivedForms = async (req, res) => {
   try {
@@ -353,11 +374,17 @@ const updateProfile = async (req, res) => {
     console.log("📎 Incoming files:", req.files);
 
     // 1) Clean out undefined / empty string fields
-    Object.keys(updateData).forEach((key) => {
-      if (updateData[key] === undefined || updateData[key] === "") {
-        delete updateData[key];
-      }
-    });
+  const protectedFields = ["category", "roomNo", "bedNo", "srNo"];
+
+Object.keys(updateData).forEach((key) => {
+  if (
+    (updateData[key] === undefined || updateData[key] === "") &&
+    !protectedFields.includes(key)
+  ) {
+    delete updateData[key];
+  }
+});
+
 
     // 2) SPECIAL FIX: normalize depositAmount (can come as ["500","500"])
     if (updateData.depositAmount !== undefined) {
