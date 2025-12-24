@@ -365,73 +365,173 @@ const getArchivedForms = async (req, res) => {
   }
 };
 
+// const updateProfile = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     let updateData = req.body;
+
+//     console.log("📥 Update Tenant Body:", updateData);
+//     console.log("📎 Incoming files:", req.files);
+
+//     // 1) Clean out undefined / empty string fields
+//   const protectedFields = ["category", "roomNo", "bedNo", "srNo"];
+
+// Object.keys(updateData).forEach((key) => {
+//   if (
+//     (updateData[key] === undefined || updateData[key] === "") &&
+//     !protectedFields.includes(key)
+//   ) {
+//     delete updateData[key];
+//   }
+// });
+
+
+//     // 2) SPECIAL FIX: normalize depositAmount (can come as ["500","500"])
+//     if (updateData.depositAmount !== undefined) {
+//       if (Array.isArray(updateData.depositAmount)) {
+//         // Take the last or first – here we take the last submitted
+//         const last = updateData.depositAmount[updateData.depositAmount.length - 1];
+//         updateData.depositAmount = Number(last);
+//       } else {
+//         updateData.depositAmount = Number(updateData.depositAmount);
+//       }
+
+//       // If still NaN, remove it so it doesn't crash
+//       if (isNaN(updateData.depositAmount)) {
+//         console.warn("⚠ depositAmount is NaN, removing from update");
+//         delete updateData.depositAmount;
+//       }
+//     }
+
+//     // 3) If files are uploaded, handle them
+//     if (req.files?.length > 0) {
+//       updateData.documents = req.files.map((file, index) => ({
+//         fileName: file.originalname,
+//         url: `/uploads/${file.filename}`,  // or wherever you store
+//         contentType: file.mimetype,
+//         size: file.size,
+//         relation: updateData[`relation_${index}`] || "Self",
+//       }));
+//     }
+
+//     // 4) Do the actual update
+//     const updatedForm = await Form.findByIdAndUpdate(id, updateData, {
+//       new: true,
+//       runValidators: true,
+//     });
+
+//     if (!updatedForm) {
+//       return res.status(404).json({ message: "Tenant not found" });
+//     }
+
+//     res.status(200).json({ message: "Updated successfully", updatedForm });
+//   } catch (error) {
+//     console.error("❌ Update error:", error);
+//     res.status(500).json({ message: "Server Error", error: error.message });
+//   }
+// };
+
+
+
+
 const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
-    let updateData = req.body;
 
-    console.log("📥 Update Tenant Body:", updateData);
-    console.log("📎 Incoming files:", req.files);
+    // helper: if value is array, take LAST (latest)
+    const lastVal = (v) => (Array.isArray(v) ? v[v.length - 1] : v);
 
-    // 1) Clean out undefined / empty string fields
-  const protectedFields = ["category", "roomNo", "bedNo", "srNo"];
+    // ✅ allowlist (recommended)
+    const allowedFields = [
+      "name",
+      "phoneNo",
+      "address",
+      "companyAddress",
+      "joiningDate",
 
-Object.keys(updateData).forEach((key) => {
-  if (
-    (updateData[key] === undefined || updateData[key] === "") &&
-    !protectedFields.includes(key)
-  ) {
-    delete updateData[key];
-  }
-});
+      "category",   // ✅ must allow
+      "floorNo",
+      "roomNo",
+      "bedNo",
 
+      "relative1Name",
+      "relative1Phone",
+      "relative2Name",
+      "relative2Phone",
 
-    // 2) SPECIAL FIX: normalize depositAmount (can come as ["500","500"])
-    if (updateData.depositAmount !== undefined) {
-      if (Array.isArray(updateData.depositAmount)) {
-        // Take the last or first – here we take the last submitted
-        const last = updateData.depositAmount[updateData.depositAmount.length - 1];
-        updateData.depositAmount = Number(last);
-      } else {
-        updateData.depositAmount = Number(updateData.depositAmount);
-      }
+      "depositAmount",
+      "baseRent",
+      "leaveDate",
+    ];
 
-      // If still NaN, remove it so it doesn't crash
-      if (isNaN(updateData.depositAmount)) {
-        console.warn("⚠ depositAmount is NaN, removing from update");
-        delete updateData.depositAmount;
+    const updateData = {};
+
+    // build clean update payload
+    for (const key of allowedFields) {
+      if (req.body[key] !== undefined) {
+        const v = lastVal(req.body[key]);
+
+        // remove empty string updates (so it won’t overwrite)
+        if (v === "") continue;
+
+        updateData[key] = v;
       }
     }
 
-    // 3) If files are uploaded, handle them
+    console.log("📥 Update Tenant Body (raw):", req.body);
+    console.log("✅ Update Tenant Data (clean):", updateData);
+
+    // normalize numbers
+    if (updateData.depositAmount !== undefined) {
+      updateData.depositAmount = Number(updateData.depositAmount);
+      if (isNaN(updateData.depositAmount)) delete updateData.depositAmount;
+    }
+
+    if (updateData.baseRent !== undefined) {
+      updateData.baseRent = Number(updateData.baseRent);
+      if (isNaN(updateData.baseRent)) delete updateData.baseRent;
+    }
+
+    // normalize date
+    if (updateData.joiningDate) {
+      updateData.joiningDate = new Date(updateData.joiningDate);
+    }
+
+    // files
     if (req.files?.length > 0) {
       updateData.documents = req.files.map((file, index) => ({
         fileName: file.originalname,
-        url: `/uploads/${file.filename}`,  // or wherever you store
+        url: `/uploads/${file.filename}`,
         contentType: file.mimetype,
         size: file.size,
-        relation: updateData[`relation_${index}`] || "Self",
+        relation: lastVal(req.body[`relation_${index}`]) || "Self",
       }));
     }
 
-    // 4) Do the actual update
-    const updatedForm = await Form.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    const updatedForm = await Form.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
 
     if (!updatedForm) {
       return res.status(404).json({ message: "Tenant not found" });
     }
 
-    res.status(200).json({ message: "Updated successfully", updatedForm });
+    return res.status(200).json({ message: "Updated successfully", updatedForm });
   } catch (error) {
+    // ✅ if unique index (category+roomNo+bedNo) blocks update
+    if (error?.code === 11000) {
+      return res.status(409).json({
+        message: "This bed is already occupied in that building.",
+        keyValue: error.keyValue,
+      });
+    }
+
     console.error("❌ Update error:", error);
-    res.status(500).json({ message: "Server Error", error: error.message });
+    return res.status(500).json({ message: "Server Error", error: error.message });
   }
 };
-
-
 
 /**
  * GET /api/form/:id
