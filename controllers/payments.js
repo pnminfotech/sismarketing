@@ -61,38 +61,45 @@ async function sendRentPendingReminder(req, res) {
     const { tenantId, amount, monthLabel } = req.body;
 
     if (!tenantId) {
-      return res
-        .status(400)
-        .json({ error: "tenantId is required" });
+      return res.status(400).json({ error: "tenantId is required" });
     }
 
-    const tenant = await Tenant.findById(tenantId);
+    // Use Form model because your tenant records are stored there
+    const Form = require("../models/formModels");
+    const tenant = await Form.findById(tenantId);
+
     if (!tenant) {
       return res.status(404).json({ error: "Tenant not found" });
     }
 
-    // Fallbacks if not passed
     const finalAmount =
-      amount ?? tenant.monthlyRent ?? tenant.rent ?? 0;
+      amount ?? tenant.baseRent ?? tenant.monthlyRent ?? tenant.rent ?? 0;
 
     const finalMonthLabel =
       monthLabel ||
       new Date().toLocaleString("en-GB", {
         month: "short",
         year: "numeric",
-      }); // e.g. "Nov 2025"
+      });
 
-    await sendPaymentReminderSms(tenant, {
+    // msg91Service expects tenant.mobile, but Form has phoneNo
+    const smsTenant = {
+      ...tenant.toObject(),
+      mobile: tenant.phoneNo,
+    };
+
+    await sendPaymentReminderSms(smsTenant, {
       amount: finalAmount,
       monthLabel: finalMonthLabel,
     });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, tenantId: tenant._id, monthLabel: finalMonthLabel });
   } catch (e) {
     console.error("sendRentPendingReminder:", e);
     return res.status(500).json({ error: "Server error" });
   }
 }
+
 
 module.exports = {
   reportPayment,

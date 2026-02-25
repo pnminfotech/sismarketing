@@ -184,6 +184,27 @@ const updateForm = async (req, res) => {
 
     await form.save();
 
+    const smsMonthLabel =
+      typeof month === "string" && /^\d{4}-\d{2}$/.test(month)
+        ? new Date(
+            Number(month.split("-")[0]),
+            Number(month.split("-")[1]) - 1,
+            1
+          ).toLocaleString("en-IN", { month: "short", year: "numeric" })
+        : month || new Date(safeDate).toLocaleString("en-IN", { month: "short", year: "numeric" });
+
+    try {
+      await sendSMS_MonthPayment(
+        form,
+        smsMonthLabel,
+        finalAmount,
+        safeDate,
+        Number(form.baseRent) || 0
+      );
+    } catch (smsError) {
+      console.error("⚠ Rent paid SMS send failed:", smsError?.message || smsError);
+    }
+
     res.status(200).json({
       success: true,
       message: "Rent updated successfully",
