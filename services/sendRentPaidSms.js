@@ -1,8 +1,19 @@
-// services/sendRentPaidSms.js
 const axios = require("axios");
+const { logSmsAttempt } = require("./smsLogService");
 
-async function sendRentPaidSms(tenant, { amount, monthLabel, datePaid, monthlyRent }) {
-  if (!tenant?.phoneNo) return;
+async function sendRentPaidSms(
+  tenant,
+  { amount, monthLabel, datePaid, monthlyRent }
+) {
+  if (!tenant?.phoneNo) {
+    await logSmsAttempt({
+      status: "skipped",
+      eventType: "rent_paid",
+      templateId: process.env.MSG91_RENT_PAID_TEMPLATE_ID || null,
+      error: "Tenant phoneNo missing",
+    });
+    return;
+  }
 
   const payload = {
     template_id: process.env.MSG91_RENT_PAID_TEMPLATE_ID,
@@ -20,19 +31,35 @@ async function sendRentPaidSms(tenant, { amount, monthLabel, datePaid, monthlyRe
   };
 
   try {
-    const res = await axios.post(
-      "https://control.msg91.com/api/v5/flow/",
-      payload,
-      {
-        headers: {
-          authkey: process.env.MSG91_AUTHKEY,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-    console.log("📩 Rent PAID SMS Sent:", res.data);
+    const res = await axios.post("https://control.msg91.com/api/v5/flow/", payload, {
+      headers: {
+        authkey: process.env.MSG91_AUTHKEY,
+        "Content-Type": "application/json",
+      },
+    });
+
+    await logSmsAttempt({
+      status: "success",
+      eventType: "rent_paid",
+      templateId: process.env.MSG91_RENT_PAID_TEMPLATE_ID || null,
+      recipientMobile: payload.recipients[0].mobiles,
+      recipientCount: 1,
+      requestPayload: payload,
+      responsePayload: res.data,
+      providerStatusCode: res.status,
+    });
   } catch (err) {
-    console.error("❌ Rent PAID SMS Error:", err.response?.data || err);
+    await logSmsAttempt({
+      status: "failed",
+      eventType: "rent_paid",
+      templateId: process.env.MSG91_RENT_PAID_TEMPLATE_ID || null,
+      recipientMobile: payload.recipients[0].mobiles,
+      recipientCount: 1,
+      requestPayload: payload,
+      responsePayload: err.response?.data || null,
+      providerStatusCode: err.response?.status || null,
+      error: err.message || err,
+    });
   }
 }
 

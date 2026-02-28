@@ -1,28 +1,24 @@
-// controllers/smsController.js
 const axios = require("axios");
+const { logSmsAttempt, getTotalSentCount } = require("../services/smsLogService");
 
 const MSG91_AUTHKEY = process.env.MSG91_AUTHKEY;
 const MSG91_SENDER_ID = process.env.MSG91_SENDER_ID;
 const MSG91_TEMPLATE_ID_RENT_REMINDER =
   process.env.MSG91_TEMPLATE_ID_RENT_REMINDER || null;
 
-// Just to verify envs at startup (won't crash)
-console.log("🔐 MSG91 config:", {
+console.log("MSG91 config:", {
   hasAuthkey: !!MSG91_AUTHKEY,
   sender: MSG91_SENDER_ID,
   hasTemplate: !!MSG91_TEMPLATE_ID_RENT_REMINDER,
 });
 
-// Normalise numbers to 91xxxxxxxxxx
 const normalizeMobile = (m) => {
   if (!m) return null;
-  let x = String(m).replace(/\D/g, ""); // remove non-digits
+  let x = String(m).replace(/\D/g, "");
 
-  // 10-digit Indian mobile → add 91
   if (x.length === 10) x = "91" + x;
-
-  // Final check
   if (!x.startsWith("91") || x.length !== 12) return null;
+
   return x;
 };
 
@@ -33,41 +29,27 @@ const sendBulkSms = async (req, res) => {
     if (!Array.isArray(tenants) || tenants.length === 0) {
       return res.status(400).json({ message: "No tenants provided" });
     }
+
     if (!message || !message.trim()) {
       return res.status(400).json({ message: "Message text is required" });
     }
 
-    // Make list of valid mobiles
-    let mobiles = tenants
-      .map((t) => normalizeMobile(t.phoneNo))
-      .filter(Boolean);
-
-    // Remove duplicates
+    let mobiles = tenants.map((t) => normalizeMobile(t.phoneNo)).filter(Boolean);
     mobiles = [...new Set(mobiles)];
 
     if (mobiles.length === 0) {
-      return res
-        .status(400)
-        .json({ message: "No valid mobile numbers found" });
+      return res.status(400).json({ message: "No valid mobile numbers found" });
     }
 
     const url = "https://api.msg91.com/api/v5/sms/bulk";
-
-    // 👉 ONE MESSAGE, MANY NUMBERS
-    // MSG91 will send the SAME 'message' to all numbers in 'to'
     const smsObject = {
       to: mobiles,
       message: message.trim(),
     };
 
-    // If you want to use a DLT template directly (when ready), uncomment:
-    // if (MSG91_TEMPLATE_ID_RENT_REMINDER) {
-    //   smsObject.template_id = MSG91_TEMPLATE_ID_RENT_REMINDER;
-    // }
-
     const payload = {
       sender: MSG91_SENDER_ID,
-      route: "4", // transactional (check in your MSG91 panel)
+      route: "4",
       country: "91",
       sms: [smsObject],
     };
@@ -77,15 +59,17 @@ const sendBulkSms = async (req, res) => {
       "Content-Type": "application/json",
     };
 
-    console.log("📤 Sending to MSG91:", {
-      url,
-      toCount: mobiles.length,
-      sampleNumber: mobiles[0],
-    });
-
     const response = await axios.post(url, payload, { headers });
 
-    console.log("✅ MSG91 response:", response.data);
+    await logSmsAttempt({
+      status: "success",
+      eventType: "bulk_sms",
+      templateId: MSG91_TEMPLATE_ID_RENT_REMINDER,
+      recipientCount: mobiles.length,
+      message: message.trim(),
+      requestPayload: payload,
+      responsePayload: response.data,
+    });
 
     return res.json({
       success: true,
@@ -97,8 +81,17 @@ const sendBulkSms = async (req, res) => {
     const status = err.response?.status;
     const data = err.response?.data;
 
-    console.error("❌ MSG91 bulk sms error status:", status);
-    console.error("❌ MSG91 bulk sms error data:", data || err.message);
+    await logSmsAttempt({
+      status: "failed",
+      eventType: "bulk_sms",
+      templateId: MSG91_TEMPLATE_ID_RENT_REMINDER,
+      recipientCount: Array.isArray(req.body?.tenants) ? req.body.tenants.length : 0,
+      message: req.body?.message || null,
+      requestPayload: req.body || null,
+      responsePayload: data || null,
+      providerStatusCode: status || null,
+      error: err.message,
+    });
 
     return res.status(500).json({
       success: false,
@@ -109,6 +102,19 @@ const sendBulkSms = async (req, res) => {
   }
 };
 
+const getTotalSentSmsCount = async (_req, res) => {
+  try {
+    const totalSentCount = await getTotalSentCount();
+    return res.json({ success: true, totalSentCount });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch total sent SMS count",
+    });
+  }
+};
+
 module.exports = {
   sendBulkSms,
+  getTotalSentSmsCount,
 };

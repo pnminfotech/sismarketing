@@ -1,25 +1,28 @@
-// utils/sendSMS.js
 const fetch = require("node-fetch");
+const { logSmsAttempt } = require("../services/smsLogService");
 
-/* ============================================================================
-   1) MONTH PAYMENT SMS
-============================================================================ */
-async function sendSMS_MonthPayment(tenant, month, rentAmount, paymentDate, baseRent) {
+async function sendSMS_MonthPayment(
+  tenant,
+  month,
+  rentAmount,
+  paymentDate,
+  baseRent
+) {
+  const payload = {
+    flow_id: process.env.MSG91_RENT_RECEIPT_FLOW_ID,
+    recipients: [
+      {
+        mobiles: "91" + tenant.phoneNo,
+        name: tenant.name,
+        number: rentAmount,
+        date: month,
+        date1: new Date(paymentDate).toLocaleDateString("en-IN"),
+        number1: baseRent,
+      },
+    ],
+  };
+
   try {
-    const payload = {
-      flow_id: process.env.MSG91_RENT_RECEIPT_FLOW_ID,
-      recipients: [
-        {
-          mobiles: "91" + tenant.phoneNo,
-          name: tenant.name,
-          number: rentAmount,
-          date: month,
-          date1: new Date(paymentDate).toLocaleDateString("en-IN"),
-          number1: baseRent
-        }
-      ]
-    };
-
     const res = await fetch("https://api.msg91.com/api/v5/flow/", {
       method: "POST",
       headers: {
@@ -30,32 +33,45 @@ async function sendSMS_MonthPayment(tenant, month, rentAmount, paymentDate, base
     });
 
     const json = await res.json();
-    console.log("📤 MonthPayment SMS sent:", json);
+    await logSmsAttempt({
+      status: res.ok ? "success" : "failed",
+      eventType: "month_payment",
+      flowId: process.env.MSG91_RENT_RECEIPT_FLOW_ID || null,
+      recipientMobile: payload.recipients[0].mobiles,
+      recipientCount: 1,
+      requestPayload: payload,
+      responsePayload: json,
+      providerStatusCode: res.status,
+      error: res.ok ? null : JSON.stringify(json),
+    });
   } catch (err) {
-    console.error("❌ Month Payment SMS Error:", err);
+    await logSmsAttempt({
+      status: "failed",
+      eventType: "month_payment",
+      flowId: process.env.MSG91_RENT_RECEIPT_FLOW_ID || null,
+      recipientMobile: payload.recipients[0].mobiles,
+      recipientCount: 1,
+      requestPayload: payload,
+      error: err.message || err,
+    });
   }
 }
 
-
-
-/* ============================================================================
-   2) ADMISSION WELCOME SMS
-============================================================================ */
 async function sendSMS_Admission(tenant) {
-  try {
-    const payload = {
-      flow_id: process.env.MSG91_ADMISSION_FLOW_ID,
-      recipients: [
-        {
-          mobiles: "91" + tenant.phoneNo,
-          name: tenant.name,
-          number: `${tenant.roomNo}/${tenant.bedNo}`,
-          date: new Date(tenant.joiningDate).toLocaleDateString("en-IN"),
-          number1: tenant.depositAmount
-        }
-      ]
-    };
+  const payload = {
+    flow_id: process.env.MSG91_ADMISSION_FLOW_ID,
+    recipients: [
+      {
+        mobiles: "91" + tenant.phoneNo,
+        name: tenant.name,
+        number: `${tenant.roomNo}/${tenant.bedNo}`,
+        date: new Date(tenant.joiningDate).toLocaleDateString("en-IN"),
+        number1: tenant.depositAmount,
+      },
+    ],
+  };
 
+  try {
     const res = await fetch("https://api.msg91.com/api/v5/flow/", {
       method: "POST",
       headers: {
@@ -66,31 +82,44 @@ async function sendSMS_Admission(tenant) {
     });
 
     const json = await res.json();
-    console.log("📤 Admission SMS sent:", json);
+    await logSmsAttempt({
+      status: res.ok ? "success" : "failed",
+      eventType: "admission_welcome",
+      flowId: process.env.MSG91_ADMISSION_FLOW_ID || null,
+      recipientMobile: payload.recipients[0].mobiles,
+      recipientCount: 1,
+      requestPayload: payload,
+      responsePayload: json,
+      providerStatusCode: res.status,
+      error: res.ok ? null : JSON.stringify(json),
+    });
   } catch (err) {
-    console.error("❌ Admission SMS Error:", err);
+    await logSmsAttempt({
+      status: "failed",
+      eventType: "admission_welcome",
+      flowId: process.env.MSG91_ADMISSION_FLOW_ID || null,
+      recipientMobile: payload.recipients[0].mobiles,
+      recipientCount: 1,
+      requestPayload: payload,
+      error: err.message || err,
+    });
   }
 }
 
-
-
-/* ============================================================================
-   3) PAYMENT REMINDER SMS (IMPORTANT — YOU WERE MISSING THIS!)
-============================================================================ */
 async function sendSMS_PaymentReminder(tenant, month, amount) {
-  try {
-    const payload = {
-      flow_id: process.env.MSG91_PAYMENT_REMINDER_FLOW_ID,
-      recipients: [
-        {
-          mobiles: "91" + tenant.phoneNo,
-          name: tenant.name,      // ##name##
-          number: amount,         // ##number##
-          date: month             // ##date##
-        }
-      ]
-    };
+  const payload = {
+    flow_id: process.env.MSG91_PAYMENT_REMINDER_FLOW_ID,
+    recipients: [
+      {
+        mobiles: "91" + tenant.phoneNo,
+        name: tenant.name,
+        number: amount,
+        date: month,
+      },
+    ],
+  };
 
+  try {
     const res = await fetch("https://api.msg91.com/api/v5/flow/", {
       method: "POST",
       headers: {
@@ -101,17 +130,30 @@ async function sendSMS_PaymentReminder(tenant, month, amount) {
     });
 
     const json = await res.json();
-    console.log("📤 PaymentReminder SMS sent:", json);
+    await logSmsAttempt({
+      status: res.ok ? "success" : "failed",
+      eventType: "payment_reminder",
+      flowId: process.env.MSG91_PAYMENT_REMINDER_FLOW_ID || null,
+      recipientMobile: payload.recipients[0].mobiles,
+      recipientCount: 1,
+      requestPayload: payload,
+      responsePayload: json,
+      providerStatusCode: res.status,
+      error: res.ok ? null : JSON.stringify(json),
+    });
   } catch (err) {
-    console.error("❌ Payment Reminder SMS Error:", err);
+    await logSmsAttempt({
+      status: "failed",
+      eventType: "payment_reminder",
+      flowId: process.env.MSG91_PAYMENT_REMINDER_FLOW_ID || null,
+      recipientMobile: payload.recipients[0].mobiles,
+      recipientCount: 1,
+      requestPayload: payload,
+      error: err.message || err,
+    });
   }
 }
 
-
-
-/* ============================================================================
-   EXPORT ALL
-============================================================================ */
 module.exports = {
   sendSMS_MonthPayment,
   sendSMS_Admission,
