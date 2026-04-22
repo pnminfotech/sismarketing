@@ -7,6 +7,67 @@ const Counter = require('../models/counterModel');
 const { sendSMS_MonthPayment } = require("../utils/sendSMS");
 const { sendSMS_Admission } = require("../utils/sendSMS");
 
+const normalizeLeaveDate = (value) => {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : new Date(value.getTime());
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  // Treat date-only strings as local midday to avoid timezone drift.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return new Date(`${raw}T12:00:00`);
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const startOfToday = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
+const archiveFormDocument = async (form, leaveDateOverride) => {
+  const archivedLeaveDate = normalizeLeaveDate(
+    leaveDateOverride !== undefined ? leaveDateOverride : form.leaveDate
+  );
+
+  const { _id, __v, ...rest } = form.toObject();
+  const archivedData = new Archive({
+    ...rest,
+    originalFormId: _id,
+    leaveDate: archivedLeaveDate || rest.leaveDate,
+  });
+
+  await archivedData.save();
+  await Form.findByIdAndDelete(_id);
+
+  return archivedData;
+};
+
+const archiveOverdueForms = async () => {
+  const todayStart = startOfToday();
+  const formsWithLeaveDate = await Form.find({
+    leaveDate: { $exists: true, $ne: null },
+  });
+
+  const overdueForms = formsWithLeaveDate.filter((form) => {
+    const leaveDate = normalizeLeaveDate(form.leaveDate);
+    return leaveDate && leaveDate < todayStart;
+  });
+
+  for (const form of overdueForms) {
+    await archiveFormDocument(form);
+  }
+
+  return overdueForms.length;
+};
+
 /* ──────────────────────────────────────────────────────────────────────────────
    LEAVE processing + daily archive
    ──────────────────────────────────────────────────────────────────────────── */
@@ -17,16 +78,18 @@ const processLeave = async (req, res) => {
 
     if (!form) return res.status(404).json({ error: "Form not found" });
 
-    const currentDate = new Date().toISOString().split("T")[0];
+    const normalizedLeaveDate = normalizeLeaveDate(leaveDate);
+    if (!normalizedLeaveDate) {
+      return res.status(400).json({ error: "Invalid leaveDate" });
+    }
 
-    if (leaveDate <= currentDate) {
-      const archivedData = new Archive({ ...form.toObject(), leaveDate });
-      await archivedData.save();
-      await Form.findByIdAndDelete(formId);
+    const todayStart = startOfToday();
 
+    if (normalizedLeaveDate < todayStart) {
+      await archiveFormDocument(form, normalizedLeaveDate);
       return res.status(200).json({ message: "Record archived successfully." });
     } else {
-      form.leaveDate = leaveDate;
+      form.leaveDate = normalizedLeaveDate;
       await form.save();
       return res.status(200).json({ message: "Leave date saved. It will be archived on the leave date." });
     }
@@ -39,17 +102,8 @@ const processLeave = async (req, res) => {
 // CRON JOB to check for leave dates every day at midnight
 cron.schedule("0 0 * * *", async () => {
   try {
-  const today = new Date().toLocaleDateString('en-CA'); 
-
-    const formsToArchive = await Form.find({ leaveDate: today });
-
-    for (const form of formsToArchive) {
-      const archivedData = new Archive({ ...form.toObject(), leaveDate: today });
-      await archivedData.save();
-      await Form.findByIdAndDelete(form._id);
-    }
-
-    console.log(`Archived ${formsToArchive.length} records for ${today}`);
+    const archivedCount = await archiveOverdueForms();
+    console.log(`Archived ${archivedCount} overdue leave records.`);
   } catch (error) {
     console.error("Error archiving records:", error);
   }
@@ -277,7 +331,19 @@ const saveLeaveDate = async (req, res) => {
       return res.status(404).json({ message: "Form not found" });
     }
 
-    form.leaveDate = new Date(leaveDate);
+    const normalizedLeaveDate = normalizeLeaveDate(leaveDate);
+    if (!normalizedLeaveDate) {
+      return res.status(400).json({ message: "Invalid leave date" });
+    }
+
+    const todayStart = startOfToday();
+
+    if (normalizedLeaveDate < todayStart) {
+      await archiveFormDocument(form, normalizedLeaveDate);
+      return res.status(200).json({ message: "Leave date has passed. Tenant archived.", leaveDate: normalizedLeaveDate });
+    }
+
+    form.leaveDate = normalizedLeaveDate;
     await form.save();
 
     res.status(200).json({ form, leaveDate: form.leaveDate });
@@ -288,28 +354,16 @@ const saveLeaveDate = async (req, res) => {
 
 const checkAndArchiveLeaves = async () => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const expiredForms = await Form.find({ leaveDate: today });
-
-    for (let form of expiredForms) {
-      await archiveAndDeleteForm(form);
-    }
-
-    console.log("Checked and archived expired leave records.");
+    const archivedCount = await archiveOverdueForms();
+    console.log(`Checked and archived ${archivedCount} expired leave records.`);
   } catch (error) {
     console.error("Error checking and archiving leaves:", error);
   }
 };
 
-setInterval(checkAndArchiveLeaves, 24 * 60 * 60 * 1000);
-
-const archiveAndDeleteForm = async (form) => {
-  const archivedData = new Archive({ ...form._doc });
-  await archivedData.save();
-  await Form.findByIdAndDelete(form._id);
-};
+checkAndArchiveLeaves().catch((error) => {
+  console.error("Initial leave archive check failed:", error);
+});
 
 const getForms = async (req, res) => {
   try {
@@ -329,12 +383,7 @@ const archiveForm = async (req, res) => {
       return res.status(404).json({ message: 'Form not found' });
     }
 
-    const archivedData = new Archive({
-      ...formToArchive._doc,
-    });
-
-    await archivedData.save();
-    await Form.findByIdAndDelete(id);
+    const archivedData = await archiveFormDocument(formToArchive);
 
     res.status(200).json(archivedData);
   } catch (error) {

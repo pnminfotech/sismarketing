@@ -27,7 +27,7 @@ const archiveSchema = new mongoose.Schema(
       },
     ],
 
-    leaveDate: { type: String , required: true },
+    leaveDate: { type: Date, default: null },
   }
 );
 

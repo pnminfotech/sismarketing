@@ -122,7 +122,8 @@ const formSchema = new mongoose.Schema(
     // Leave tracking
     // ─────────────────────────────────────────
     leaveDate: {
-      type: String,
+      type: Date,
+      default: null,
     },
 
     // ─────────────────────────────────────────
