@@ -2,6 +2,7 @@
 const Form = require('../models/formModels');
 const Archive = require('../models/archiveSchema');
 const DuplicateForm = require('../models/DuplicateForm');
+const Room = require('../models/Room');
 const cron = require("node-cron");
 const Counter = require('../models/counterModel');
 const { sendSMS_MonthPayment } = require("../utils/sendSMS");
@@ -392,7 +393,7 @@ const archiveForm = async (req, res) => {
 };
 
 const restoreForm = async (req, res) => {
-  const { id, category } = req.body; // ✅ must be here
+  const { id, category, roomNo, bedNo, floorNo } = req.body;
 
   try {
     const archivedData = await Archive.findById(id);
@@ -402,13 +403,47 @@ const restoreForm = async (req, res) => {
 
     const { leaveDate, _id, __v, createdAt, updatedAt, ...restoredData } = archivedObj;
 
-    restoredData.category = restoredData.category || category;
+    restoredData.category = category || restoredData.category;
+    restoredData.roomNo = roomNo || restoredData.roomNo;
+    restoredData.bedNo = bedNo || restoredData.bedNo;
 
-    if (!restoredData.category) {
+    if (!restoredData.category || !restoredData.roomNo || !restoredData.bedNo) {
       return res.status(400).json({
-        message: "category is required. Send category from frontend (selectedCategory).",
+        message: "category, roomNo and bedNo are required to restore a tenant.",
       });
     }
+
+    const room = await Room.findOne({
+      category: restoredData.category,
+      roomNo: restoredData.roomNo,
+    }).lean();
+
+    if (!room) {
+      return res.status(404).json({ message: "Selected room was not found." });
+    }
+
+    const bedExists = (room.beds || []).some(
+      (bed) =>
+        String(bed?.bedNo || "").trim().toLowerCase() ===
+        String(restoredData.bedNo || "").trim().toLowerCase()
+    );
+
+    if (!bedExists) {
+      return res.status(404).json({ message: "Selected bed was not found in that room." });
+    }
+
+    const existingOccupant = await Form.findOne({
+      category: restoredData.category,
+      roomNo: restoredData.roomNo,
+      bedNo: restoredData.bedNo,
+    }).lean();
+
+    if (existingOccupant) {
+      return res.status(409).json({ message: "Selected room/bed is already occupied." });
+    }
+
+    restoredData.floorNo = floorNo || room.floorNo || restoredData.floorNo;
+    restoredData.leaveDate = null;
 
     const restoredForm = await Form.create(restoredData);
     await Archive.findByIdAndDelete(id);
