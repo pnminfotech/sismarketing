@@ -12,7 +12,7 @@ const archiveSchema = new mongoose.Schema(
     address: { type: String, required: true },
     relativeAddress1: { type: String },
     relativeAddress2: { type: String },
-    floorNo: { type: String, required: true },
+    floorNo: { type: String, default: "" },
     bedNo: { type: String, required: true },
     companyAddress: { type: String },
 

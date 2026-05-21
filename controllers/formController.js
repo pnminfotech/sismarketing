@@ -39,8 +39,22 @@ const archiveFormDocument = async (form, leaveDateOverride) => {
   );
 
   const { _id, __v, ...rest } = form.toObject();
+  let floorNo = rest.floorNo;
+
+  if (!floorNo && rest.category && rest.roomNo) {
+    const room = await Room.findOne({
+      category: rest.category,
+      roomNo: rest.roomNo,
+    })
+      .select("floorNo")
+      .lean();
+
+    floorNo = room?.floorNo || "";
+  }
+
   const archivedData = new Archive({
     ...rest,
+    floorNo,
     originalFormId: _id,
     leaveDate: archivedLeaveDate || rest.leaveDate,
   });
@@ -74,8 +88,9 @@ const archiveOverdueForms = async () => {
    ──────────────────────────────────────────────────────────────────────────── */
 const processLeave = async (req, res) => {
   try {
-    const { formId, leaveDate } = req.body;
-    const form = await Form.findById(formId);
+    const { formId, id, leaveDate } = req.body;
+    const targetId = formId || id;
+    const form = await Form.findById(targetId);
 
     if (!form) return res.status(404).json({ error: "Form not found" });
 
@@ -90,13 +105,19 @@ const processLeave = async (req, res) => {
       await archiveFormDocument(form, normalizedLeaveDate);
       return res.status(200).json({ message: "Record archived successfully." });
     } else {
-      form.leaveDate = normalizedLeaveDate;
-      await form.save();
-      return res.status(200).json({ message: "Leave date saved. It will be archived on the leave date." });
+      await Form.findByIdAndUpdate(
+        targetId,
+        { $set: { leaveDate: normalizedLeaveDate } },
+        { new: true, runValidators: false }
+      );
+      return res.status(200).json({
+        message: "Leave date saved. It will be archived on the leave date.",
+        leaveDate: normalizedLeaveDate,
+      });
     }
   } catch (error) {
     console.error("Error processing leave:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: error.message || "Internal server error" });
   }
 };
 
@@ -324,10 +345,11 @@ const getDuplicateForms = async (req, res) => {
 };
 
 const saveLeaveDate = async (req, res) => {
-  const { id, leaveDate } = req.body;
+  const { id, formId, leaveDate } = req.body;
+  const targetId = id || formId;
 
   try {
-    const form = await Form.findById(id);
+    const form = await Form.findById(targetId);
     if (!form) {
       return res.status(404).json({ message: "Form not found" });
     }
@@ -344,11 +366,15 @@ const saveLeaveDate = async (req, res) => {
       return res.status(200).json({ message: "Leave date has passed. Tenant archived.", leaveDate: normalizedLeaveDate });
     }
 
-    form.leaveDate = normalizedLeaveDate;
-    await form.save();
+    await Form.findByIdAndUpdate(
+      targetId,
+      { $set: { leaveDate: normalizedLeaveDate } },
+      { new: true, runValidators: false }
+    );
 
-    res.status(200).json({ form, leaveDate: form.leaveDate });
+    res.status(200).json({ leaveDate: normalizedLeaveDate });
   } catch (error) {
+    console.error("Error saving leave date:", error);
     res.status(500).json({ message: "Error saving leave date: " + error.message });
   }
 };
