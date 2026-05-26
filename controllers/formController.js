@@ -33,6 +33,25 @@ const startOfToday = () => {
   return today;
 };
 
+const ALLOWED_DOCUMENT_RELATIONS = ["Self", "Father", "Mother", "Husband", "Sister", "Brother"];
+
+const normalizeDocumentRelation = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "Self";
+  if (ALLOWED_DOCUMENT_RELATIONS.includes(raw)) return raw;
+
+  const lower = raw.toLowerCase();
+  if (lower.includes("mother")) return "Mother";
+  if (lower.includes("father")) return "Father";
+  if (lower.includes("parent")) return "Father";
+  if (lower.includes("husband")) return "Husband";
+  if (lower.includes("sister")) return "Sister";
+  if (lower.includes("brother")) return "Brother";
+  if (lower.includes("self") || lower.includes("tenant")) return "Self";
+
+  return "Self";
+};
+
 const archiveFormDocument = async (form, leaveDateOverride) => {
   const archivedLeaveDate = normalizeLeaveDate(
     leaveDateOverride !== undefined ? leaveDateOverride : form.leaveDate
@@ -157,6 +176,13 @@ const saveForm = async (req, res) => {
 
     req.body.srNo = counter.seq.toString();
 
+    if (Array.isArray(req.body.documents)) {
+      req.body.documents = req.body.documents.map((doc) => ({
+        ...doc,
+        relation: normalizeDocumentRelation(doc?.relation),
+      }));
+    }
+
     console.log("📥 Incoming payload to saveForm:", JSON.stringify(req.body, null, 2));
     console.log("📂 Documents received:", req.body.documents);
 
@@ -228,6 +254,13 @@ const updateForm = async (req, res) => {
     }
 
     // ✅ SAFE payment mode
+    if (Array.isArray(form.documents) && form.documents.length > 0) {
+      form.documents = form.documents.map((doc) => ({
+        ...(doc?.toObject ? doc.toObject() : doc),
+        relation: normalizeDocumentRelation(doc?.relation),
+      }));
+    }
+
     const allowedModes = ["Cash", "Online", "UPI", "Card", "Bank"];
     const safePaymentMode = allowedModes.includes(paymentMode)
       ? paymentMode
@@ -246,15 +279,35 @@ const updateForm = async (req, res) => {
     const finalAmount = Number(rentAmount) || 0;
 
     if (rentIndex !== -1) {
+      const previousAmount = Number(form.rents[rentIndex].rentAmount) || 0;
+      const paymentDelta = finalAmount > previousAmount
+        ? finalAmount - previousAmount
+        : finalAmount;
+
       form.rents[rentIndex].rentAmount = finalAmount;
       form.rents[rentIndex].paymentMode = safePaymentMode;
       form.rents[rentIndex].date = safeDate;
+      if (!Array.isArray(form.rents[rentIndex].paymentEntries)) {
+        form.rents[rentIndex].paymentEntries = [];
+      }
+      if (paymentDelta > 0) {
+        form.rents[rentIndex].paymentEntries.push({
+          amount: paymentDelta,
+          date: safeDate,
+          paymentMode: safePaymentMode,
+        });
+      }
     } else {
       form.rents.push({
         month,
         rentAmount: finalAmount,
         paymentMode: safePaymentMode,
         date: safeDate,
+        paymentEntries: finalAmount > 0 ? [{
+          amount: finalAmount,
+          date: safeDate,
+          paymentMode: safePaymentMode,
+        }] : [],
       });
     }
 
@@ -635,7 +688,7 @@ const updateProfile = async (req, res) => {
         url: `/uploads/${file.filename}`,
         contentType: file.mimetype,
         size: file.size,
-        relation: lastVal(req.body[`relation_${index}`]) || "Self",
+        relation: normalizeDocumentRelation(lastVal(req.body[`relation_${index}`])),
       }));
     }
 

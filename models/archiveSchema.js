@@ -24,6 +24,13 @@ const archiveSchema = new mongoose.Schema(
       {
         rentAmount: { type: Number },
         date: { type: Date },
+        paymentEntries: [
+          {
+            amount: { type: Number },
+            date: { type: Date },
+            paymentMode: { type: String },
+          },
+        ],
       },
     ],
 

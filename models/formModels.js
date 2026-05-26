@@ -113,6 +113,20 @@ const formSchema = new mongoose.Schema(
             enum: ["Cash", "Online"],
             default: "Cash",
           },
+          paymentEntries: {
+            type: [
+              {
+                amount: { type: Number, default: 0 },
+                date: { type: Date },
+                paymentMode: {
+                  type: String,
+                  enum: ["Cash", "Online", "UPI", "Card", "Bank"],
+                  default: "Cash",
+                },
+              },
+            ],
+            default: [],
+          },
         },
       ],
       default: [],
