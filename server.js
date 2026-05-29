@@ -152,33 +152,43 @@ const adminLeave = require("./routes/adminLeaveRoutes");
 const app = express();
 
 /* ----------------------------- CORS FIX ------------------------------ */
-// ALLOW FRONTEND DOMAINS ONLY  
+function normalizeOrigin(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
 const allowedOrigins = [
   "https://pnminfotech.com",
-  "https://pnminfotech.com/sismarketing",
-  "http://localhost:3000"
-];
+  "https://www.pnminfotech.com",
+  "http://localhost:3000",
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_ORIGIN,
+]
+  .map(normalizeOrigin)
+  .filter(Boolean);
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (mobile apps, curl, Postman)
-      if (!origin) return callback(null, true);
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("CORS blocked for: " + origin));
-      }
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-  })
-);
+    const normalizedOrigin = normalizeOrigin(origin);
 
-// Preflight for all routes
-app.options("*", cors());
+    if (allowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
+
+    console.error("CORS blocked for:", normalizedOrigin);
+    return callback(new Error("CORS blocked for: " + normalizedOrigin));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+
+// Preflight for all routes should use the same origin rules.
+app.options("*", cors(corsOptions));
 
 /* ----------------------------- Middleware ------------------------------ */
 app.use(express.json());
